@@ -56,6 +56,16 @@ pub fn collect_stutter_diag_events(
     deadlib_audio_core::collect_stutter_diag_events(now_host_nanos, window_ns, out);
 }
 
+/// How many times to retry opening an audio device that reports "busy" at startup.
+const DEVICE_BUSY_RETRIES: u32 = 20;
+const DEVICE_BUSY_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// True for an open failure caused by another holder of the device (EBUSY).
+fn is_device_busy_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("device or resource busy") || lower.contains("resource busy")
+}
+
 /// Initialize audio with caller-resolved consolidated and legacy ReplayGain cache paths.
 pub fn init(
     cfg: InitConfig,
@@ -69,14 +79,32 @@ pub fn init(
     })
     .map_err(str::to_string)?;
     let controls = init_controls();
-    let output_plan = prepare_output(&cfg, controls.clone());
-    let startup_output_devices = output_plan.devices().to_vec();
+    let mut attempt = 0;
+    let (startup_output_devices, stream_ready) = loop {
+        let output_plan = prepare_output(&cfg, controls.clone());
+        let startup_output_devices = output_plan.devices().to_vec();
+        match stream::start(output_plan) {
+            Ok(ready) => break (startup_output_devices, ready),
+            // Another process (typically the sound server probing the card at
+            // login) can briefly hold an exclusive device. Without a retry the
+            // game starts silent and needs a manual restart.
+            Err(e) if attempt < DEVICE_BUSY_RETRIES && is_device_busy_error(&e) => {
+                attempt += 1;
+                log::warn!(
+                    "Audio device busy ({e}); retry {attempt}/{DEVICE_BUSY_RETRIES} in {}ms",
+                    DEVICE_BUSY_RETRY_DELAY.as_millis()
+                );
+                std::thread::sleep(DEVICE_BUSY_RETRY_DELAY);
+            }
+            Err(e) => return Err(e),
+        }
+    };
     let stream::StreamReady {
         command_sender,
         backend_ready: ready,
         sfx_sender,
         played_map,
-    } = stream::start(output_plan)?;
+    } = stream_ready;
     let music_clock = MusicClock::new(played_map, ready.device_sample_rate);
     Ok((
         AudioControl {
@@ -323,4 +351,18 @@ pub fn assist_sfx_generation() -> u64 {
 #[must_use]
 pub fn get_output_timing_snapshot() -> OutputTimingSnapshot {
     deadlib_audio_core::get_output_timing_snapshot()
+}
+
+#[cfg(test)]
+mod busy_retry_tests {
+    use super::is_device_busy_error;
+
+    #[test]
+    fn detects_alsa_busy_but_not_other_failures() {
+        assert!(is_device_busy_error(
+            "failed to open ALSA PCM 'hw:CARD=1,DEV=0': ALSA function 'snd_pcm_open' failed with error 'Device or resource busy (16)'"
+        ));
+        assert!(!is_device_busy_error("no such device (19)"));
+        assert!(!is_device_busy_error("sample rate 44100 not supported"));
+    }
 }
