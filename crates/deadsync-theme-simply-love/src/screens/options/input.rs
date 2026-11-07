@@ -988,6 +988,12 @@ pub(super) fn apply_submenu_choice_delta(
                 queue_audio(state, AudioRequest::SetReplayGain(enabled));
                 action = Some(ThemeEffect::None);
             }
+            SubRowId::VolumeIndicator => {
+                let enabled = new_index == 1;
+                state.audio_options.show_volume_indicator = enabled;
+                queue_audio(state, AudioRequest::SetVolumeIndicator(enabled));
+                action = Some(ThemeEffect::None);
+            }
             _ => {}
         }
     } else if matches!(kind, SubmenuKind::SelectMusic) {

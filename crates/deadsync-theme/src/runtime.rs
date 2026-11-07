@@ -47,6 +47,7 @@ pub enum AudioRequest {
     SetGlobalOffsetMillis(i32),
     SetPreservePitch(bool),
     SetReplayGain(bool),
+    SetVolumeIndicator(bool),
     /// Warm loudness metadata for theme-selected preview media without
     /// exposing the analysis service or its scheduling policy to the theme.
     PrewarmReplayGain(Vec<PathBuf>),

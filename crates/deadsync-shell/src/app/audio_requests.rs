@@ -86,6 +86,7 @@ pub(super) fn options_view(audio: &deadsync_audio_stream::AudioControl) -> Audio
         master_volume: cfg.master_volume,
         music_volume: cfg.music_volume,
         menu_music_volume: cfg.menu_music_volume,
+        show_volume_indicator: cfg.show_volume_indicator,
         sfx_volume: cfg.sfx_volume,
         assist_tick_volume: cfg.assist_tick_volume,
     }
@@ -175,6 +176,9 @@ pub(super) fn execute(audio: &mut AudioControl, sounds: &UiSfx, request: AudioRe
         AudioRequest::SetPreservePitch(enabled) => {
             config::runtime_update::update_rate_mod_preserves_pitch(enabled);
             audio.set_preserve_pitch_enabled(enabled);
+        }
+        AudioRequest::SetVolumeIndicator(enabled) => {
+            config::runtime_update::update_show_volume_indicator(enabled)
         }
         AudioRequest::SetReplayGain(enabled) => {
             config::runtime_update::update_enable_replaygain(enabled);

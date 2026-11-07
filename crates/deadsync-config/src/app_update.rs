@@ -552,6 +552,10 @@ pub fn set_linux_audio_backend(cfg: &mut Config, backend: LinuxAudioBackend) -> 
     set_if_changed(&mut cfg.linux_audio_backend, backend)
 }
 
+pub fn set_show_volume_indicator(cfg: &mut Config, enabled: bool) -> bool {
+    set_if_changed(&mut cfg.show_volume_indicator, enabled)
+}
+
 pub fn set_menu_music(cfg: &mut Config, enabled: bool) -> bool {
     set_if_changed(&mut cfg.menu_music, enabled)
 }

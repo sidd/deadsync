@@ -321,6 +321,7 @@ pub struct Config {
     pub assist_tick_volume: u8,
     /// Percent of `music_volume` used outside gameplay (menus, song preview).
     pub menu_music_volume: u8,
+    pub show_volume_indicator: bool,
     pub sfx_volume: u8,
     // None = auto (use the backend default output route); Some(N) = startup output-device index.
     pub audio_output_device_index: Option<u16>,
@@ -567,6 +568,7 @@ impl Default for Config {
             music_wheel_switch_speed: audio.music_wheel_switch_speed,
             assist_tick_volume: audio.assist_tick_volume,
             menu_music_volume: audio.menu_music_volume,
+            show_volume_indicator: audio.show_volume_indicator,
             sfx_volume: audio.sfx_volume,
             audio_output_device_index: audio.output_device_index,
             audio_output_mode: AudioOutputMode::Auto,

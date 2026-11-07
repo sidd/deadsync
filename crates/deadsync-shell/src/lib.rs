@@ -51,6 +51,7 @@ mod session_results;
 mod smx_config;
 mod song_search;
 mod stutter_diag;
+mod system_volume;
 mod sync_analysis;
 mod sync_analysis_cache;
 mod transition_effects;

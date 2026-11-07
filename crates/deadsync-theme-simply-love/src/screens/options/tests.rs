@@ -1909,6 +1909,7 @@ fn audio_options_view_builds_and_rebuilds_localized_device_labels() {
         master_volume: 91,
         music_volume: 81,
         menu_music_volume: 100,
+        show_volume_indicator: true,
         sfx_volume: 71,
         assist_tick_volume: 61,
     };

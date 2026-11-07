@@ -66,6 +66,17 @@ fn is_device_busy_error(message: &str) -> bool {
     lower.contains("device or resource busy") || lower.contains("resource busy")
 }
 
+/// One attempt to plan and open the output stream.
+fn open_output_stream(
+    cfg: &InitConfig,
+    controls: &std::sync::Arc<deadlib_audio_core::MixControls>,
+) -> Result<(Vec<OutputDeviceInfo>, stream::StreamReady), String> {
+    let output_plan = prepare_output(cfg, controls.clone());
+    let startup_output_devices = output_plan.devices().to_vec();
+    let ready = stream::start(output_plan)?;
+    Ok((startup_output_devices, ready))
+}
+
 /// Initialize audio with caller-resolved consolidated and legacy ReplayGain cache paths.
 pub fn init(
     cfg: InitConfig,
@@ -81,10 +92,8 @@ pub fn init(
     let controls = init_controls();
     let mut attempt = 0;
     let (startup_output_devices, stream_ready) = loop {
-        let output_plan = prepare_output(&cfg, controls.clone());
-        let startup_output_devices = output_plan.devices().to_vec();
-        match stream::start(output_plan) {
-            Ok(ready) => break (startup_output_devices, ready),
+        match open_output_stream(&cfg, &controls) {
+            Ok(opened) => break opened,
             // Another process (typically the sound server probing the card at
             // login) can briefly hold an exclusive device. Without a retry the
             // game starts silent and needs a manual restart.

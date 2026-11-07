@@ -2,6 +2,7 @@ use crate::bools::{parse_bool_str, parse_u8_bool_or_default};
 use crate::defaults::{
     DEFAULT_ASSIST_TICK_VOLUME, DEFAULT_CUSTOM_SOUNDS_ENABLED, DEFAULT_ENABLE_REPLAYGAIN,
     DEFAULT_MASTER_VOLUME, DEFAULT_MENU_MUSIC, DEFAULT_MENU_MUSIC_VOLUME, DEFAULT_MUSIC_VOLUME,
+    DEFAULT_SHOW_VOLUME_INDICATOR,
     DEFAULT_MUSIC_WHEEL_SWITCH_SPEED, DEFAULT_RATE_MOD_PRESERVES_PITCH, DEFAULT_SFX_VOLUME,
     DEFAULT_TAB_ACCELERATION, DEFAULT_VISUAL_DELAY_SECONDS, DEFAULT_WRITE_CURRENT_SCREEN,
 };
@@ -101,6 +102,8 @@ pub struct AudioOptions {
     pub assist_tick_volume: u8,
     /// Percent of the music volume used outside gameplay (menus, song preview).
     pub menu_music_volume: u8,
+    /// Show an on-screen level when the system volume changes.
+    pub show_volume_indicator: bool,
     pub output_device_index: Option<u16>,
     pub sample_rate_hz: Option<u32>,
     pub rate_mod_preserves_pitch: bool,
@@ -122,6 +125,7 @@ impl Default for AudioOptions {
             sfx_volume: DEFAULT_SFX_VOLUME,
             assist_tick_volume: DEFAULT_ASSIST_TICK_VOLUME,
             menu_music_volume: DEFAULT_MENU_MUSIC_VOLUME,
+            show_volume_indicator: DEFAULT_SHOW_VOLUME_INDICATOR,
             output_device_index: None,
             sample_rate_hz: None,
             rate_mod_preserves_pitch: DEFAULT_RATE_MOD_PRESERVES_PITCH,
@@ -209,6 +213,10 @@ pub fn load_audio_options(conf: &SimpleIni, default: AudioOptions) -> AudioOptio
             .get("Options", "MenuMusicVolume")
             .and_then(|value| value.parse().ok())
             .map_or(default.menu_music_volume, clamp_audio_volume_percent),
+        show_volume_indicator: parse_u8_bool_or_default(
+            conf.get("Options", "ShowVolumeIndicator"),
+            default.show_volume_indicator,
+        ),
         output_device_index: conf
             .get("Options", "AudioOutputDevice")
             .and_then(parse_auto_audio_output_device)
@@ -283,6 +291,7 @@ pub fn push_audio_music_option_lines(content: &mut String, options: AudioOptions
 
 pub fn push_audio_tail_option_lines(content: &mut String, options: AudioOptions) {
     push_line(content, "MenuMusicVolume", options.menu_music_volume);
+    push_bool(content, "ShowVolumeIndicator", options.show_volume_indicator);
     push_line(content, "AssistTickVolume", options.assist_tick_volume);
     push_line(content, "SFXVolume", options.sfx_volume);
     push_bool(content, "TabAcceleration", options.tab_acceleration);
@@ -364,6 +373,7 @@ mod tests {
             sfx_volume: 80,
             assist_tick_volume: 50,
             menu_music_volume: 100,
+            show_volume_indicator: true,
             output_device_index: None,
             sample_rate_hz: None,
             rate_mod_preserves_pitch: true,
@@ -507,6 +517,7 @@ mod tests {
         let mut options = default_options();
         options.assist_tick_volume = 31;
         options.menu_music_volume = 35;
+        options.show_volume_indicator = false;
         options.sfx_volume = 42;
         options.tab_acceleration = false;
         options.write_current_screen = true;
@@ -518,6 +529,7 @@ mod tests {
             content,
             concat!(
                 "MenuMusicVolume=35\n",
+                "ShowVolumeIndicator=0\n",
                 "AssistTickVolume=31\n",
                 "SFXVolume=42\n",
                 "TabAcceleration=0\n",
@@ -542,6 +554,7 @@ mod tests {
             SFXVolume=101
             AssistTickVolume=17
             MenuMusicVolume=44
+            ShowVolumeIndicator=0
             AudioOutputDevice=3
             AudioSampleRateHz=48000
             RateModPreservesPitch=0
@@ -563,6 +576,7 @@ mod tests {
         assert_eq!(loaded.sfx_volume, 100);
         assert_eq!(loaded.assist_tick_volume, 17);
         assert_eq!(loaded.menu_music_volume, 44);
+        assert!(!loaded.show_volume_indicator);
         assert_eq!(loaded.output_device_index, Some(3));
         assert_eq!(loaded.sample_rate_hz, Some(48_000));
         assert!(!loaded.rate_mod_preserves_pitch);

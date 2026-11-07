@@ -80,6 +80,7 @@ pub fn update_twitch_chat(options: crate::streaming::TwitchOptions) {
 }
 
 update_config_fn!(pub fn update_menu_music(enabled: bool) => set_menu_music);
+update_config_fn!(pub fn update_show_volume_indicator(enabled: bool) => set_show_volume_indicator);
 update_config_fn!(pub fn update_software_renderer_threads(threads: u8) => set_software_renderer_threads);
 update_config_fn!(pub fn update_audio_sample_rate(rate: Option<u32>) => set_audio_sample_rate);
 update_config_fn!(pub fn update_audio_output_device(index: Option<u16>) => set_audio_output_device);

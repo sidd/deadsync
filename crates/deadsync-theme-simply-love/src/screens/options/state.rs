@@ -1354,6 +1354,12 @@ pub fn init(view: OptionsInitView) -> State {
         usize::from(state.audio_options.replay_gain),
     );
     set_choice_by_id(
+        &mut state.sub[SubmenuKind::Sound].choice_indices,
+        SOUND_OPTIONS_ROWS,
+        SubRowId::VolumeIndicator,
+        usize::from(state.audio_options.show_volume_indicator),
+    );
+    set_choice_by_id(
         &mut state.sub[SubmenuKind::SelectMusic].choice_indices,
         SELECT_MUSIC_OPTIONS_ROWS,
         SubRowId::ShowBanners,
