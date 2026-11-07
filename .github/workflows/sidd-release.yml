@@ -55,7 +55,9 @@ jobs:
             | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
             | sort -V | tail -1)"
           [ -n "$tag" ] || { echo "no upstream release tag found" >&2; exit 1; }
-          state="upstream=${tag} sidd=$(git rev-parse HEAD)"
+          # Docs-only commits must not trigger a rebuild, so key on the last code change.
+          patch_rev="$(git log -1 --format=%H -- . ':!docs' ':!*.md')"
+          state="upstream=${tag} sidd=${patch_rev}"
           {
             echo "tag=${tag}"
             echo "ver=${tag#v}"
@@ -128,6 +130,8 @@ jobs:
           STATE: ${{ steps.up.outputs.state }}
         run: |
           set -euo pipefail
+          # repo-out was created by root inside the Arch container.
+          sudo chown -R "$(id -u):$(id -g)" repo-out
           printf '%s\n' "$STATE" > repo-out/state.txt
           if ! gh release view repo >/dev/null 2>&1; then
             gh release create repo --target sidd \
@@ -174,6 +178,6 @@ jobs:
             title="sidd-release failed"
             body="Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           fi
-          if ! gh issue list --state open --search "\"${title}\" in:title" --json number -q '.[0].number' | grep -q .; then
-            gh issue create --title "$title" --body "$body"
+          if ! gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&per_page=100" -q '.[].title' | grep -qxF "$title"; then
+            gh api "repos/${GITHUB_REPOSITORY}/issues" -f title="$title" -f body="$body" >/dev/null
           fi
