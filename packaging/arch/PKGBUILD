@@ -1,0 +1,69 @@
+# Maintainer: sidd
+# Packages a locally built deadsync release tarball (see scripts/sidd/).
+# Inputs (environment): DEADSYNC_VER (e.g. 0.5.2494), SIDD_PKGREL, SIDD_TARBALL (absolute path).
+pkgname=deadsync-sidd
+pkgdesc='DeadSync (sidd fork: tracks upstream releases plus local patches)'
+url='https://github.com/pnn64/deadsync'
+license=('GPL-3.0-only')
+arch=('x86_64')
+provides=('deadsync')
+conflicts=('deadsync' 'deadsync-git' 'deadsync-bin')
+replaces=('deadsync-bin')
+depends=(
+    'vulkan-icd-loader'
+    'libgl'
+    'libudev.so'
+    'libasound.so'
+    'hicolor-icon-theme'
+)
+options=('!strip')
+install="${pkgname}.install"
+
+pkgver="${DEADSYNC_VER:?set DEADSYNC_VER}"
+pkgrel="${SIDD_PKGREL:-1}"
+
+source=("deadsync-linux.tar.gz::file://${SIDD_TARBALL:?set SIDD_TARBALL}")
+sha256sums=('SKIP')
+
+package() {
+    local _src="${srcdir}/deadsync"
+
+    # portable.txt would make the game keep its data next to the binary
+    # instead of in ~/.local/share/deadsync.
+    rm -f "${_src}/portable.txt"
+
+    install -dm755 "${pkgdir}/opt/deadsync"
+    cp -a "${_src}/." "${pkgdir}/opt/deadsync/"
+    chmod 755 "${pkgdir}/opt/deadsync/deadsync"
+
+    install -Dm755 /dev/stdin "${pkgdir}/usr/bin/deadsync" <<'WRAP'
+#!/bin/sh
+exec /opt/deadsync/deadsync "$@"
+WRAP
+
+    install -Dm644 /dev/stdin \
+        "${pkgdir}/usr/share/applications/deadsync.desktop" <<'DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=DeadSync
+GenericName=Rhythm Game
+Comment=ITG/StepMania engine focused on perfect sync and competitive performance
+Exec=/usr/bin/deadsync
+Icon=deadsync
+Categories=Game;
+Keywords=ITG;StepMania;rhythm;dance;
+StartupNotify=true
+DESKTOP
+
+    local _icondir="${_src}/assets/graphics/icon"
+    for _size in 16 24 32 48 64 96 128 256 512 1024; do
+        install -Dm644 "${_icondir}/icon-${_size}.png" \
+            "${pkgdir}/usr/share/icons/hicolor/${_size}x${_size}/apps/deadsync.png"
+    done
+    install -Dm644 "${_icondir}/icon.svg" \
+        "${pkgdir}/usr/share/icons/hicolor/scalable/apps/deadsync.svg"
+
+    [[ -f "${_src}/LICENSE" ]] && install -Dm644 "${_src}/LICENSE" \
+        "${pkgdir}/usr/share/licenses/deadsync/LICENSE"
+    return 0
+}
