@@ -31,6 +31,7 @@ use std::array::from_fn;
 use std::cell::{Cell, RefCell};
 
 use super::display_mods::{self, DisplayModsFrame};
+use super::tech_coach::{self, TechCoachFrame, TechCoachTrack};
 
 mod prewarm;
 mod text;
@@ -622,6 +623,7 @@ pub(crate) fn compose_frame(
     camera_caches: &mut [NotefieldCameraCache; MAX_PLAYERS],
     broken_run_lookup: &BrokenRunLookup,
     stream_progress_lookup: &StreamProgressLookup,
+    tech_coach_track: &TechCoachTrack,
     profile: &profile_data::Profile,
     placement: FieldPlacement,
     play_style: profile_data::PlayStyle,
@@ -1004,6 +1006,20 @@ pub(crate) fn compose_frame(
                 alpha,
                 playfield_center_x,
                 notefield_offset_y,
+            },
+        );
+    }
+    if !tech_coach_track.is_empty() {
+        tech_coach::compose(
+            hud_actors,
+            TechCoachFrame {
+                track: tech_coach_track,
+                now: deadsync_core::song_time::song_time_ns_to_seconds(
+                    state.visible_music_time_ns(player_idx),
+                ),
+                center_x: playfield_center_x,
+                combo_y: field.hud_layout.zmod_layout.combo_y,
+                reverse: field.hud_reverse,
             },
         );
     }

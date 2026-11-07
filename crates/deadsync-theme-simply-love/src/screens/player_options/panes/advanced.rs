@@ -469,6 +469,15 @@ const CROSSOVER_CUE_BRACKETS: ChoiceBinding<bool> = ChoiceBinding::<bool> {
         from_profile: |p| if p.crossover_cue_brackets { 1 } else { 0 },
     }),
 };
+const TECH_COACH: ChoiceBinding<bool> = ChoiceBinding::<bool> {
+    apply: |p, v| {
+        p.tech_coach = v;
+        Outcome::persisted()
+    },
+    init: Some(CycleInit {
+        from_profile: |p| if p.tech_coach { 1 } else { 0 },
+    }),
+};
 
 const ERROR_BAR_OFFSET_X: NumericBinding = NumericBinding {
     parse: parse_i32,
@@ -1935,6 +1944,16 @@ pub(super) fn build_advanced_rows(
             tr("PlayerOptions", "MeasureCounterOptionsVerticalLookahead").to_string(),
             tr("PlayerOptions", "MeasureCounterOptionsBrokenRunTotal").to_string(),
             tr("PlayerOptions", "MeasureCounterOptionsRunTimer").to_string(),
+        ],
+    ));
+    b.push(Row::cycle(
+        RowId::TechCoach,
+        lookup_key("PlayerOptions", "TechCoach"),
+        lookup_key("PlayerOptionsHelp", "TechCoachHelp"),
+        CycleBinding::Bool(TECH_COACH),
+        vec![
+            tr("PlayerOptions", "TechCoachOff").to_string(),
+            tr("PlayerOptions", "TechCoachOn").to_string(),
         ],
     ));
     b.push(Row::cycle(

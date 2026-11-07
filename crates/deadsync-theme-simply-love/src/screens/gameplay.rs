@@ -12,6 +12,7 @@ use crate::screens::components::gameplay::{
     FRAME_TEXT_BPM, FRAME_TEXT_LIFE_BASE, FRAME_TEXT_VERTEX_BUFFERS, gameplay_stats, notefield,
     step_stats_gifs,
 };
+use crate::screens::components::gameplay::tech_coach::TechCoachTrack;
 use crate::screens::components::shared::banner as shared_banner;
 use crate::screens::components::shared::density::{self, DensityHistCache};
 use crate::screens::components::shared::heart_rate;
@@ -874,6 +875,9 @@ pub struct State {
     notefield_judgment_assets: [notefield::ResolvedJudgmentAssets; MAX_PLAYERS],
     notefield_combo_assets: notefield::ResolvedComboMilestoneAssets,
     notefield_plans: [notefield::GameplayNotefieldPlan; MAX_PLAYERS],
+    /// Tech Coach annotations, built once at screen entry (empty when the
+    /// option is off) and only read by the notefield HUD afterwards.
+    tech_coach: [TechCoachTrack; MAX_PLAYERS],
     /// Practice-only immutable annotations, precompiled at entry and dropped
     /// with the screen. Empty regular-gameplay slices allocate no storage;
     /// live frames borrow text without formatting, invalidation, or growth.
@@ -1252,6 +1256,10 @@ impl State {
             StreamProgressLookup::new(gameplay.mini_indicator_stream_segments(player))
         });
         let notefield_widths = gameplay_notefield_widths(&gameplay, &noteskin_assets);
+        let tech_coach = std::array::from_fn(|player| {
+            let enabled = step_stats_profiles[player].tech_coach;
+            TechCoachTrack::from_gameplay(&gameplay, player, enabled)
+        });
         let display_mods_text =
             std::array::from_fn(|player| notefield::preferred_mods_text(&gameplay, player));
         let rate_text = cached_rate_text(gameplay.music_rate());
@@ -1363,6 +1371,7 @@ impl State {
             notefield_judgment_assets,
             notefield_combo_assets,
             notefield_plans,
+            tech_coach,
             practice_timing_labels: std::array::from_fn(|_| Box::default()),
             sync_overlay_text_cache: RefCell::new(SyncOverlayTextCache::default()),
             background_path_dirty: true,
@@ -5723,6 +5732,7 @@ pub fn draw_field(
         notefield_camera_cache,
         &state.notefield_broken_run_lookup[player_idx],
         &state.notefield_stream_progress_lookup[player_idx],
+        &state.tech_coach[player_idx],
         profile,
         placement,
         play_style,

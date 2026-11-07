@@ -105,6 +105,7 @@ pub enum RowId {
     MeasureCounter,
     MeasureCounterLookahead,
     MeasureCounterOptions,
+    TechCoach,
     MeasureLines,
     RescoreEarlyHits,
     EarlyDecentWayOffOptions,
@@ -1110,6 +1111,7 @@ pub(super) fn row_shows_all_choices_inline(id: RowId) -> bool {
         || id == RowId::MeasureCounter
         || id == RowId::MeasureCounterLookahead
         || id == RowId::MeasureCounterOptions
+        || id == RowId::TechCoach
         || id == RowId::MeasureLines
         || id == RowId::TimingWindows
         || id == RowId::JudgmentTilt

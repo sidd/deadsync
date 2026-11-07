@@ -4,6 +4,7 @@ pub(crate) mod golf;
 pub mod notefield;
 pub mod score_counter;
 pub mod step_stats_gifs;
+pub(crate) mod tech_coach;
 
 // Song-prewarmed frame-layout slots for short values that can change during
 // play. Slots are independent so a stable actor hits its own last layout even

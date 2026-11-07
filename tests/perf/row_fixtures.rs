@@ -97,6 +97,7 @@ const ROW_IDS: &[RowId] = &[
     RowId::MeasureCounter,
     RowId::MeasureCounterLookahead,
     RowId::MeasureCounterOptions,
+    RowId::TechCoach,
     RowId::MeasureLines,
     RowId::RescoreEarlyHits,
     RowId::EarlyDecentWayOffOptions,
