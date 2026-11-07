@@ -135,6 +135,8 @@ impl MachineRecordRowText {
 pub(crate) struct MachineRecordsPaneText {
     rows: [MachineRecordRowText; MACHINE_RECORD_ROWS],
     split: bool,
+    /// Draws an "EX" tag in the header strip (the EX-ranked variant of the pane).
+    ex_label: bool,
     children: RefCell<Option<(MachineRecordsCacheKey, Arc<[Actor]>)>>,
 }
 
@@ -153,6 +155,20 @@ impl MachineRecordsPaneText {
             score.personal_record_highlight_rank,
             score.show_machine_personal_split,
         )
+    }
+
+    /// Same pane, ranked by EX score instead of ITG score.
+    pub(crate) fn new_ex(score: &ScoreInfo) -> Self {
+        let ex = &score.ex_records;
+        let mut text = Self::from_records(
+            &ex.machine,
+            ex.machine_highlight_rank,
+            &ex.personal,
+            ex.personal_highlight_rank,
+            ex.show_split,
+        );
+        text.ex_label = true;
+        text
     }
 
     fn from_records(
@@ -188,6 +204,7 @@ impl MachineRecordsPaneText {
         Self {
             rows,
             split,
+            ex_label: false,
             children: RefCell::new(None),
         }
     }
@@ -330,7 +347,20 @@ fn build_machine_records_children(
         )
     };
 
-    let mut children = Vec::with_capacity(MACHINE_RECORD_ROWS * 4 + 1);
+    let mut children = Vec::with_capacity(MACHINE_RECORD_ROWS * 4 + 2);
+
+    if text.ex_label {
+        children.push(act!(text:
+            font("miso"):
+            settext(TextContent::static_str("EX")):
+            align(0.5, 0.5):
+            xy(0.0, 0.0):
+            zoom(pane_zoom):
+            z(101):
+            diffuse(0.0, 0.76, 1.0, 1.0):
+            horizalign(center)
+        ));
+    }
 
     if text.split {
         let row_height = MACHINE_RECORD_SPLIT_ROW_HEIGHT * pane_zoom;

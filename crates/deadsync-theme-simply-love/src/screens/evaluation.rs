@@ -1985,6 +1985,7 @@ mod tests {
             EvalPane::FaPlus,
             EvalPane::Column,
             EvalPane::MachineRecords,
+            EvalPane::MachineRecordsEx,
             EvalPane::QrCode,
             EvalPane::GrooveStats,
             EvalPane::GrooveStatsEx,
@@ -2031,6 +2032,7 @@ mod tests {
             EvalPane::FaPlus,
             EvalPane::Column,
             EvalPane::MachineRecords,
+            EvalPane::MachineRecordsEx,
             EvalPane::QrCode,
             EvalPane::GrooveStats,
             EvalPane::GrooveStatsEx,
@@ -2060,6 +2062,7 @@ mod tests {
             EvalPane::FaPlus,
             EvalPane::Column,
             EvalPane::MachineRecords,
+            EvalPane::MachineRecordsEx,
             EvalPane::QrCode,
             EvalPane::GrooveStats,
             EvalPane::GrooveStatsEx,
@@ -2090,6 +2093,7 @@ mod tests {
             EvalPane::HardEx,
             EvalPane::Column,
             EvalPane::MachineRecords,
+            EvalPane::MachineRecordsEx,
             EvalPane::QrCode,
             EvalPane::GrooveStats,
             EvalPane::GrooveStatsEx,
@@ -2184,6 +2188,7 @@ pub(crate) enum EvalPane {
     HardEx,
     Column,
     MachineRecords,
+    MachineRecordsEx,
     QrCode,
     GrooveStats,
     GrooveStatsEx,
@@ -2250,6 +2255,7 @@ fn eval_pane_cycle(
     }
     panes.push(EvalPane::Column);
     panes.push(EvalPane::MachineRecords);
+    panes.push(EvalPane::MachineRecordsEx);
     if has_qr && has_gs {
         panes.push(EvalPane::QrCode);
     }
@@ -2659,6 +2665,7 @@ pub struct State {
     stats_presentation: [Option<eval_panes::StatsPanePresentation>; MAX_PLAYERS],
     timing_pane_text: [Option<eval_panes::TimingPaneText>; MAX_PLAYERS],
     machine_records_text: [Option<eval_panes::MachineRecordsPaneText>; MAX_PLAYERS],
+    machine_records_ex_text: [Option<eval_panes::MachineRecordsPaneText>; MAX_PLAYERS],
     qr_presentation: [Option<eval_panes::QrPanePresentation>; MAX_PLAYERS],
     step_artist_text: [StepArtistText; MAX_PLAYERS],
     timing_arrows_text: [Option<eval_panes::TimingArrowsText>; MAX_PLAYERS],
@@ -2762,6 +2769,7 @@ impl Clone for State {
             stats_presentation: self.stats_presentation.clone(),
             timing_pane_text: self.timing_pane_text.clone(),
             machine_records_text: self.machine_records_text.clone(),
+            machine_records_ex_text: self.machine_records_ex_text.clone(),
             qr_presentation: self.qr_presentation.clone(),
             step_artist_text: self.step_artist_text.clone(),
             timing_arrows_text: self.timing_arrows_text.clone(),
@@ -3222,6 +3230,11 @@ pub fn init(init_view: EvaluationInitView) -> State {
             .as_ref()
             .map(eval_panes::MachineRecordsPaneText::new)
     });
+    let machine_records_ex_text = std::array::from_fn(|index| {
+        score_info[index]
+            .as_ref()
+            .map(eval_panes::MachineRecordsPaneText::new_ex)
+    });
     let qr_presentation = std::array::from_fn(|index| {
         score_info[index]
             .as_ref()
@@ -3261,6 +3274,7 @@ pub fn init(init_view: EvaluationInitView) -> State {
         stats_presentation,
         timing_pane_text,
         machine_records_text,
+        machine_records_ex_text,
         qr_presentation,
         step_artist_text,
         timing_arrows_text,
@@ -3537,6 +3551,11 @@ pub fn init_from_score_info(
             .as_ref()
             .map(eval_panes::MachineRecordsPaneText::new)
     });
+    let machine_records_ex_text = std::array::from_fn(|index| {
+        score_info[index]
+            .as_ref()
+            .map(eval_panes::MachineRecordsPaneText::new_ex)
+    });
     let qr_presentation = std::array::from_fn(|index| {
         score_info[index]
             .as_ref()
@@ -3576,6 +3595,7 @@ pub fn init_from_score_info(
         stats_presentation,
         timing_pane_text,
         machine_records_text,
+        machine_records_ex_text,
         qr_presentation,
         step_artist_text,
         timing_arrows_text,
@@ -6299,6 +6319,16 @@ pub fn push_actors(
                 ),
                 EvalPane::MachineRecords => {
                     if let Some(text) = state.machine_records_text[player_idx].as_ref() {
+                        eval_panes::push_machine_records_pane(
+                            actors,
+                            text,
+                            controller,
+                            state.active_color_index,
+                        );
+                    }
+                }
+                EvalPane::MachineRecordsEx => {
+                    if let Some(text) = state.machine_records_ex_text[player_idx].as_ref() {
                         eval_panes::push_machine_records_pane(
                             actors,
                             text,

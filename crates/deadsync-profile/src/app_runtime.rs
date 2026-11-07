@@ -532,6 +532,44 @@ pub fn personal_leaderboard_local_for_side(
     )
 }
 
+/// Machine-wide local leaderboard ranked by EX score (names are profile initials).
+#[must_use]
+pub fn machine_leaderboard_local_ex(
+    chart_hash: &str,
+    max_entries: usize,
+) -> Vec<deadsync_score::LeaderboardEntry> {
+    deadsync_score::machine_leaderboard_local_from_profiles_by(
+        &local_score_profile_sources(),
+        chart_hash,
+        max_entries,
+        false,
+        deadsync_score::LocalScoreMetric::Ex,
+    )
+}
+
+/// Active profile's local leaderboard for `side`, ranked by EX score.
+#[must_use]
+pub fn personal_leaderboard_local_ex_for_side(
+    chart_hash: &str,
+    side: PlayerSide,
+    max_entries: usize,
+) -> Vec<deadsync_score::LeaderboardEntry> {
+    if chart_hash.trim().is_empty() || max_entries == 0 {
+        return Vec::new();
+    }
+    let Some(profile_id) = crate::runtime_active_local_profile_id_for_side(side) else {
+        return Vec::new();
+    };
+    let source = local_score_profile_source_for_id(&profile_id, "");
+    deadsync_score::personal_leaderboard_local_from_root_by(
+        &source.root,
+        chart_hash,
+        &source.initials,
+        max_entries,
+        deadsync_score::LocalScoreMetric::Ex,
+    )
+}
+
 #[must_use]
 pub fn machine_replays_local(
     chart_hash: &str,
