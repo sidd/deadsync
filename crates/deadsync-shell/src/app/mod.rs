@@ -8122,6 +8122,13 @@ impl App {
         }
 
         self.append_screenshot_overlay_actors(&mut actors, Instant::now());
+        self.state.shell.system_volume.append_actors(
+            || config::runtime::get().show_volume_indicator,
+            &mut actors,
+            Instant::now(),
+            space::screen_width(),
+            space::screen_height(),
+        );
 
         (actors, CLEAR, gameplay_segments)
     }

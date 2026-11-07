@@ -26,3 +26,4 @@ pub mod twitch_chat;
 pub mod update_overlay;
 pub mod version_overlay;
 pub mod visual_style_bg;
+pub mod volume_indicator;

@@ -396,6 +396,7 @@ const fn audio_options(cfg: &Config) -> AudioOptions {
         sfx_volume: cfg.sfx_volume,
         assist_tick_volume: cfg.assist_tick_volume,
         menu_music_volume: cfg.menu_music_volume,
+        show_volume_indicator: cfg.show_volume_indicator,
         output_device_index: cfg.audio_output_device_index,
         sample_rate_hz: cfg.audio_sample_rate_hz,
         rate_mod_preserves_pitch: cfg.rate_mod_preserves_pitch,

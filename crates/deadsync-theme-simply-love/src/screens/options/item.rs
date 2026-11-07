@@ -193,6 +193,7 @@ pub enum ItemId {
     SndGlobalOffset,
     SndRateModPitch,
     SndReplayGain,
+    SndVolumeIndicator,
     SndApplyReplayGain,
 
     // Select Music Options submenu
@@ -430,6 +431,7 @@ pub const ITEMS: &[Item] = &[
             HelpEntry::Bullet(lookup_key("OptionsSound", "MineSounds")),
             HelpEntry::Bullet(lookup_key("OptionsSound", "GlobalOffset")),
             HelpEntry::Bullet(lookup_key("OptionsSound", "RateModPreservesPitch")),
+            HelpEntry::Bullet(lookup_key("OptionsSound", "VolumeIndicator")),
             HelpEntry::Bullet(lookup_key("OptionsSound", "ReplayGain")),
         ],
     },

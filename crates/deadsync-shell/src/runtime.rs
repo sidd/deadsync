@@ -47,6 +47,7 @@ pub struct ShellState {
     pub pending_window_position: Option<PhysicalPosition<i32>>,
     pub interaction: ShellInteractionState,
     pub screenshot: ScreenshotRuntimeState<PlayerSide>,
+    pub system_volume: crate::system_volume::SystemVolumeIndicator,
 }
 
 impl ShellState {
@@ -91,6 +92,7 @@ impl ShellState {
             pending_window_position: None,
             interaction: ShellInteractionState::new(cfg.tab_acceleration),
             screenshot: ScreenshotRuntimeState::new(),
+            system_volume: crate::system_volume::SystemVolumeIndicator::new(),
         }
     }
 

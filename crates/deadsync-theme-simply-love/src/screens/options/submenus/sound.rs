@@ -96,6 +96,15 @@ pub(in crate::screens::options) const SOUND_OPTIONS_ROWS: &[SubRow] = &[
         inline: true,
     },
     SubRow {
+        id: SubRowId::VolumeIndicator,
+        label: lookup_key("OptionsSound", "VolumeIndicator"),
+        choices: &[
+            localized_choice("Common", "Off"),
+            localized_choice("Common", "On"),
+        ],
+        inline: true,
+    },
+    SubRow {
         id: SubRowId::ReplayGain,
         label: lookup_key("OptionsSound", "ReplayGain"),
         choices: &[
@@ -221,6 +230,14 @@ pub(in crate::screens::options) const SOUND_OPTIONS_ITEMS: &[Item] = &[
         help: &[HelpEntry::Paragraph(lookup_key(
             "OptionsSoundHelp",
             "RateModPreservesPitchHelp",
+        ))],
+    },
+    Item {
+        id: ItemId::SndVolumeIndicator,
+        name: lookup_key("OptionsSound", "VolumeIndicator"),
+        help: &[HelpEntry::Paragraph(lookup_key(
+            "OptionsSoundHelp",
+            "VolumeIndicatorHelp",
         ))],
     },
     Item {
