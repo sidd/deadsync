@@ -484,6 +484,10 @@ pub fn update_crossover_cue_brackets_for_side(side: PlayerSide, enabled: bool) {
     profile_ini_update(side, |profile| profile.set_crossover_cue_brackets(enabled));
 }
 
+pub fn update_tech_coach_for_side(side: PlayerSide, enabled: bool) {
+    profile_ini_update(side, |profile| profile.set_tech_coach(enabled));
+}
+
 pub fn update_crossover_cue_duration_ms_for_side(side: PlayerSide, ms: u16) {
     profile_ini_update(side, |profile| profile.set_crossover_cue_duration_ms(ms));
 }

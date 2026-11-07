@@ -7450,6 +7450,9 @@ pub struct PlayerOptionsData {
     /// cues. Off by default, since crossover brackets are commonly
     /// unintended or misidentified.
     pub crossover_cue_brackets: bool,
+    /// Tech Coach: label upcoming step tech (crossovers, footswitches, ...)
+    /// near the notefield shortly before it arrives.
+    pub tech_coach: bool,
     /// Show the break-length countdown number on long crossover cues (>= 5 s).
     pub column_countdown: bool,
     pub judgment_back: bool,
@@ -7607,6 +7610,7 @@ fn default_player_options() -> PlayerOptionsData {
         crossover_cue_duration_ms: CROSSOVER_CUE_DURATION_DEFAULT_MS,
         crossover_cue_quantization: CROSSOVER_CUE_QUANTIZATION_DEFAULT,
         crossover_cue_brackets: false,
+        tech_coach: false,
         column_countdown: false,
         judgment_back: false,
         error_ms_display: false,
@@ -8029,6 +8033,7 @@ where
         "CrossoverCueBrackets",
         options.crossover_cue_brackets,
     );
+    options.tech_coach = load_u8_bool(&mut get, "TechCoach", options.tech_coach);
     options.column_countdown = load_u8_bool(&mut get, "ColumnCountdown", options.column_countdown);
     options.judgment_back = load_u8_bool(&mut get, "JudgmentBack", options.judgment_back);
     options.error_ms_display = load_u8_bool(&mut get, "ErrorMSDisplay", options.error_ms_display);
@@ -8686,6 +8691,7 @@ pub fn append_player_options_section(
         "CrossoverCueBrackets={}\n",
         i32::from(options.crossover_cue_brackets)
     );
+    let _ = write!(content, "TechCoach={}\n", i32::from(options.tech_coach));
     let _ = write!(
         content,
         "ColumnCountdown={}\n",
@@ -9371,6 +9377,7 @@ pub struct Profile {
     pub crossover_cue_duration_ms: u16,
     pub crossover_cue_quantization: u8,
     pub crossover_cue_brackets: bool,
+    pub tech_coach: bool,
     pub column_countdown: bool,
     // zmod ExtraAesthetics: draw judgments/error timing HUD behind notes.
     pub judgment_back: bool,
@@ -9584,6 +9591,7 @@ impl Default for Profile {
             crossover_cue_duration_ms: player_options.crossover_cue_duration_ms,
             crossover_cue_quantization: player_options.crossover_cue_quantization,
             crossover_cue_brackets: player_options.crossover_cue_brackets,
+            tech_coach: player_options.tech_coach,
             column_countdown: player_options.column_countdown,
             judgment_back: player_options.judgment_back,
             error_ms_display: player_options.error_ms_display,
@@ -10087,6 +10095,10 @@ impl Profile {
         set_value_if_changed(&mut self.crossover_cue_brackets, enabled)
     }
 
+    pub fn set_tech_coach(&mut self, enabled: bool) -> bool {
+        set_value_if_changed(&mut self.tech_coach, enabled)
+    }
+
     pub fn set_crossover_cue_duration_ms(&mut self, ms: u16) -> bool {
         set_value_if_changed(
             &mut self.crossover_cue_duration_ms,
@@ -10561,6 +10573,7 @@ impl Profile {
             crossover_cue_duration_ms: self.crossover_cue_duration_ms,
             crossover_cue_quantization: self.crossover_cue_quantization,
             crossover_cue_brackets: self.crossover_cue_brackets,
+            tech_coach: self.tech_coach,
             column_countdown: self.column_countdown,
             judgment_back: self.judgment_back,
             error_ms_display: self.error_ms_display,
@@ -10713,6 +10726,7 @@ impl Profile {
         self.crossover_cue_duration_ms = options.crossover_cue_duration_ms;
         self.crossover_cue_quantization = options.crossover_cue_quantization;
         self.crossover_cue_brackets = options.crossover_cue_brackets;
+        self.tech_coach = options.tech_coach;
         self.column_countdown = options.column_countdown;
         self.judgment_back = options.judgment_back;
         self.error_ms_display = options.error_ms_display;

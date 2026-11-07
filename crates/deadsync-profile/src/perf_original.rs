@@ -200,6 +200,7 @@ impl Profile {
         self.crossover_cue_duration_ms = options.crossover_cue_duration_ms;
         self.crossover_cue_quantization = options.crossover_cue_quantization;
         self.crossover_cue_brackets = options.crossover_cue_brackets;
+        self.tech_coach = options.tech_coach;
         self.column_countdown = options.column_countdown;
         self.judgment_back = options.judgment_back;
         self.error_ms_display = options.error_ms_display;
