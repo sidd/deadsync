@@ -115,6 +115,20 @@ pub(super) fn apply_submenu_choice_delta(
                     }
                     return None;
                 }
+                SubRowId::MenuMusicVolume => {
+                    if adjust_ms_value(
+                        &mut state.menu_music_volume_pct,
+                        delta,
+                        VOLUME_MIN_PERCENT,
+                        VOLUME_MAX_PERCENT,
+                    ) {
+                        clear_render_cache(state);
+                        let percent = state.menu_music_volume_pct as u8;
+                        queue_volume_change(state, AudioVolumeTarget::MenuMusic, percent);
+                        return Some(ThemeEffect::None);
+                    }
+                    return None;
+                }
                 SubRowId::MusicVolume => {
                     if adjust_ms_value(
                         &mut state.music_volume_pct,

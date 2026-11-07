@@ -67,6 +67,7 @@ pub struct SaveSnapshot {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PublishedConfigEffects {
     pub audio_mix_levels: AudioMixLevels,
+    pub menu_music_volume: u8,
     pub replaygain_enabled: bool,
     pub preserve_pitch_enabled: bool,
     pub overscan: (i32, i32, i32, i32),
@@ -609,6 +610,7 @@ impl PublishedConfigEffects {
     pub const fn from_config(cfg: &Config) -> Self {
         Self {
             audio_mix_levels: audio_mix_levels_from_config(cfg),
+            menu_music_volume: cfg.menu_music_volume,
             replaygain_enabled: cfg.enable_replaygain,
             preserve_pitch_enabled: cfg.rate_mod_preserves_pitch,
             overscan: (

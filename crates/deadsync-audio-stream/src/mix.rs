@@ -1,5 +1,5 @@
 use deadlib_audio_core::{MixBus, MixControls};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 
 pub const EFFECT_BUS: MixBus = MixBus::new(0);
@@ -25,6 +25,10 @@ const DEFAULT_LEVELS: AudioMixLevels = AudioMixLevels {
 
 static LEVELS: AtomicU32 = AtomicU32::new(pack_levels(DEFAULT_LEVELS));
 static CONTROLS: OnceLock<Arc<MixControls>> = OnceLock::new();
+/// Percent of the music volume used while outside gameplay (menus, song preview).
+static MENU_MUSIC_SCALE: AtomicU8 = AtomicU8::new(100);
+/// True on every screen except gameplay. The app flips it on screen changes.
+static MENU_MUSIC_ACTIVE: AtomicBool = AtomicBool::new(true);
 
 #[inline(always)]
 const fn pack_levels(levels: AudioMixLevels) -> u32 {
@@ -47,10 +51,25 @@ const fn unpack_levels(packed: u32) -> AudioMixLevels {
     }
 }
 
+/// Music stream gain: master x music, scaled by the menu percentage outside gameplay.
+#[inline(always)]
+fn stream_gain(levels: AudioMixLevels, menu_active: bool, menu_scale_pct: u8) -> f32 {
+    let base = f32::from(levels.master_volume) * 0.01 * f32::from(levels.music_volume) * 0.01;
+    if menu_active {
+        base * f32::from(menu_scale_pct.min(100)) * 0.01
+    } else {
+        base
+    }
+}
+
 #[inline(always)]
 fn apply_levels(controls: &MixControls, levels: AudioMixLevels) {
     let master = f32::from(levels.master_volume) * 0.01;
-    controls.set_stream_gain(master * f32::from(levels.music_volume) * 0.01);
+    controls.set_stream_gain(stream_gain(
+        levels,
+        MENU_MUSIC_ACTIVE.load(Ordering::Relaxed),
+        MENU_MUSIC_SCALE.load(Ordering::Relaxed),
+    ));
     let sfx_gain = master * f32::from(levels.sfx_volume) * 0.01;
     controls.set_bus_gain(EFFECT_BUS, sfx_gain);
     controls.set_bus_gain(SCREEN_BUS, sfx_gain);
@@ -76,6 +95,24 @@ pub fn set_audio_mix_levels(levels: AudioMixLevels) {
     LEVELS.store(pack_levels(levels), Ordering::Release);
     if let Some(controls) = CONTROLS.get() {
         apply_levels(controls, levels);
+    }
+}
+
+/// Sets the menu-music percentage (0..=100) and re-applies the stream gain.
+pub fn set_menu_music_scale(percent: u8) {
+    MENU_MUSIC_SCALE.store(percent.min(100), Ordering::Relaxed);
+    if let Some(controls) = CONTROLS.get() {
+        apply_levels(controls, audio_mix_levels());
+    }
+}
+
+/// Marks whether the app is currently outside gameplay and re-applies the stream gain.
+pub fn set_menu_music_active(active: bool) {
+    if MENU_MUSIC_ACTIVE.swap(active, Ordering::Relaxed) == active {
+        return;
+    }
+    if let Some(controls) = CONTROLS.get() {
+        apply_levels(controls, audio_mix_levels());
     }
 }
 
@@ -133,5 +170,23 @@ mod tests {
         assert!((controls.bus_gain(SCREEN_BUS) - 0.3).abs() <= f32::EPSILON);
         assert!((controls.bus_gain(MINE_BUS) - 0.3).abs() <= f32::EPSILON);
         assert!((controls.bus_gain(ASSIST_TICK_BUS) - 0.2).abs() <= f32::EPSILON);
+    }
+
+    #[test]
+    fn menu_scale_only_applies_outside_gameplay() {
+        let levels = AudioMixLevels {
+            master_volume: 50,
+            music_volume: 80,
+            sfx_volume: 100,
+            assist_tick_volume: 100,
+        };
+        // 50% master x 80% music = 0.4; 50% menu scale halves it outside gameplay.
+        assert!((stream_gain(levels, true, 50) - 0.2).abs() < 1e-6);
+        assert!((stream_gain(levels, false, 50) - 0.4).abs() < 1e-6);
+        // Default 100% leaves the menu level equal to the master-derived level.
+        assert!((stream_gain(levels, true, 100) - 0.4).abs() < 1e-6);
+        // Out-of-range values are clamped, never boosted.
+        assert!((stream_gain(levels, true, 200) - 0.4).abs() < 1e-6);
+        assert!(stream_gain(levels, true, 0).abs() < 1e-6);
     }
 }

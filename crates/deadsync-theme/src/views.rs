@@ -93,6 +93,7 @@ pub struct AudioOptionsView {
     pub replay_gain: bool,
     pub master_volume: u8,
     pub music_volume: u8,
+    pub menu_music_volume: u8,
     pub sfx_volume: u8,
     pub assist_tick_volume: u8,
 }
@@ -691,6 +692,7 @@ mod tests {
             replay_gain: false,
             master_volume: 90,
             music_volume: 80,
+            menu_music_volume: 100,
             sfx_volume: 70,
             assist_tick_volume: 60,
         };

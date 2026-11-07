@@ -206,6 +206,11 @@ impl App {
             self.mark_screen_entry_runtime_dirty(target);
         }
         self.state.screens.current_screen = target;
+        // Menu music runs at the "menu music volume" percentage; gameplay at full music volume.
+        deadsync_audio_stream::set_menu_music_active(!matches!(
+            target,
+            CurrentScreen::Gameplay | CurrentScreen::Practice
+        ));
         self.sync_gameplay_input_capture();
         write_current_screen_file(
             ActiveTheme::current_screen_file_name(target),
