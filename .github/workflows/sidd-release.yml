@@ -1,0 +1,179 @@
+name: sidd-release
+
+# Keeps this fork shippable: every few hours, find the newest upstream release,
+# replay the patches on the `sidd` branch onto it, build, and publish an Arch
+# pacman repo as assets of the GitHub release named `repo`.
+#
+# Nothing here pushes rebased history. The `sidd` branch only moves when a human
+# (or Claude) changes the patch stack; CI rebases in a throwaway checkout.
+
+on:
+  schedule:
+    - cron: "17 */4 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Rebuild even if upstream tag and patches are unchanged"
+        type: boolean
+        default: false
+  push:
+    branches: [sidd]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sidd-release
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_URL: https://github.com/pnn64/deadsync.git
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Checkout patch stack
+        uses: actions/checkout@v4
+        with:
+          ref: sidd
+          fetch-depth: 0
+
+      - name: Resolve newest upstream release
+        id: up
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$(git ls-remote --tags --refs "$UPSTREAM_URL" 'v*' \
+            | sed 's|.*refs/tags/||' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V | tail -1)"
+          [ -n "$tag" ] || { echo "no upstream release tag found" >&2; exit 1; }
+          state="upstream=${tag} sidd=$(git rev-parse HEAD)"
+          {
+            echo "tag=${tag}"
+            echo "ver=${tag#v}"
+            echo "state=${state}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Newest upstream release: ${tag}"
+
+      - name: Check whether a rebuild is needed
+        id: need
+        shell: bash
+        env:
+          STATE: ${{ steps.up.outputs.state }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          mkdir -p prev-state
+          if [ "${FORCE:-false}" != "true" ] \
+             && gh release download repo -p state.txt -D prev-state --clobber 2>/dev/null \
+             && [ "$(cat prev-state/state.txt)" = "$STATE" ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "Already published for: $STATE"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "Needs build for: $STATE"
+          fi
+
+      - name: Replay patches onto the upstream release
+        if: steps.need.outputs.build == 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.up.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "sidd-release"
+          git config user.email "sidd-release@users.noreply.github.com"
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch --no-tags upstream "refs/tags/${TAG}:refs/tags/upstream-${TAG}"
+          git checkout -B work
+          if ! git rebase "refs/tags/upstream-${TAG}"; then
+            git status --short | head -20
+            git rebase --abort || true
+            echo "REBASE_CONFLICT=1" >> "$GITHUB_ENV"
+            exit 1
+          fi
+          git log --oneline "refs/tags/upstream-${TAG}..HEAD"
+
+      - name: Build release (Debian 12 container, same as upstream)
+        if: steps.need.outputs.build == 'true'
+        run: bash scripts/build-linux-release-docker.sh x86_64 native
+
+      - name: Package release tarball
+        if: steps.need.outputs.build == 'true'
+        run: bash scripts/package-linux-release.sh "${{ steps.up.outputs.tag }}" x86_64 native
+
+      - name: Build pacman package and repo database
+        if: steps.need.outputs.build == 'true'
+        env:
+          TAG: ${{ steps.up.outputs.tag }}
+          VER: ${{ steps.up.outputs.ver }}
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src archlinux:base-devel \
+            bash /src/scripts/sidd/build-pacman-repo.sh \
+              "/src/dist/deadsync-${TAG}-x86_64-linux.tar.gz" \
+              "$VER" "${{ github.run_number }}" /src/repo-out
+
+      - name: Publish to the `repo` release
+        if: steps.need.outputs.build == 'true'
+        shell: bash
+        env:
+          STATE: ${{ steps.up.outputs.state }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$STATE" > repo-out/state.txt
+          if ! gh release view repo >/dev/null 2>&1; then
+            gh release create repo --target sidd \
+              --title "pacman repo (sidd)" \
+              --notes "Binary pacman repo consumed by the dance box. Not meant to be downloaded by hand."
+          fi
+          new_pkg="$(cd repo-out && ls deadsync-sidd-*.pkg.tar.zst)"
+          gh release upload repo repo-out/* --clobber
+          # Remove superseded packages only after the new one is up.
+          gh release view repo --json assets -q '.assets[].name' \
+            | grep -E '^deadsync-sidd-.*\.pkg\.tar\.zst$' \
+            | grep -vx "$new_pkg" \
+            | while read -r old; do gh release delete-asset repo "$old" -y; done
+
+      - name: Keepalive (GitHub disables schedules after 60 quiet days)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "sidd-release"
+          git config user.email "sidd-release@users.noreply.github.com"
+          last=0
+          if git fetch --no-tags origin keepalive 2>/dev/null; then
+            last="$(git log -1 --format=%ct FETCH_HEAD)"
+          fi
+          if [ $(( $(date +%s) - last )) -gt $(( 20 * 86400 )) ]; then
+            blob="$(date -u +%FT%TZ | git hash-object -w --stdin)"
+            tree="$(printf '100644 blob %s\tkeepalive\n' "$blob" | git mktree)"
+            commit="$(git commit-tree "$tree" -m "keepalive $(date -u +%F)")"
+            git push --force origin "${commit}:refs/heads/keepalive"
+          fi
+
+      - name: Report failure as an issue
+        if: failure()
+        shell: bash
+        env:
+          TAG: ${{ steps.up.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "${REBASE_CONFLICT:-0}" = "1" ]; then
+            title="Patches no longer apply on upstream ${TAG}"
+            body="Replaying the \`sidd\` branch onto upstream ${TAG} conflicted. The box keeps its current package until the patch stack is updated. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          else
+            title="sidd-release failed"
+            body="Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          fi
+          if ! gh issue list --state open --search "\"${title}\" in:title" --json number -q '.[0].number' | grep -q .; then
+            gh issue create --title "$title" --body "$body"
+          fi

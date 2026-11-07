@@ -1,0 +1,8 @@
+post_install() {
+    echo "deadsync-sidd installed to /opt/deadsync (user data stays in ~/.local/share/deadsync)."
+    echo "A running game keeps the old binary until it is restarted."
+}
+
+post_upgrade() {
+    post_install
+}
