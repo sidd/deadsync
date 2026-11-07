@@ -414,6 +414,12 @@ fn score_info_from_stage_with_record(
         personal_records,
         personal_record_highlight_rank,
         show_machine_personal_split: !earned_machine_record && earned_top2_personal,
+        ex_records: crate::session_results::ex_local_records(
+            chart_hash,
+            side,
+            record.map_or(player.ex_score_percent, |record| record.ex_score_percent),
+            local_score_valid,
+        ),
     })
 }
 

@@ -829,6 +829,24 @@ fn merge_machine_scalars(
     }
 }
 
+/// Which stored percentage a local leaderboard ranks by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalScoreMetric {
+    Itg,
+    Ex,
+}
+
+impl LocalScoreMetric {
+    /// Header percentage as the 0..1 fraction used by `score_percent`.
+    #[inline(always)]
+    fn header_fraction(self, header: &LocalScoreHeader) -> f64 {
+        match self {
+            Self::Itg => header.score_percent,
+            Self::Ex => header.ex_score_percent / 100.0,
+        }
+    }
+}
+
 struct LocalLeaderboardCandidate<'a> {
     name: &'a str,
     machine_tag: Option<&'a str>,
@@ -873,6 +891,7 @@ fn push_local_leaderboard_candidates_from_dir<'a>(
     header_buf: &mut Vec<u8>,
     next_ordinal: &mut usize,
     out: &mut Vec<LocalLeaderboardCandidate<'a>>,
+    metric: LocalScoreMetric,
 ) {
     let Ok(read_dir) = fs::read_dir(dir) else {
         return;
@@ -903,7 +922,7 @@ fn push_local_leaderboard_candidates_from_dir<'a>(
         out.push(LocalLeaderboardCandidate {
             name,
             machine_tag,
-            score_percent: header.score_percent,
+            score_percent: metric.header_fraction(&header),
             played_at_ms,
             is_fail: grade_from_code(header.grade_code) == Grade::Failed
                 || header.fail_time.is_some(),
@@ -927,6 +946,7 @@ fn push_local_leaderboard_candidates_from_root<'a>(
     header_buf: &mut Vec<u8>,
     next_ordinal: &mut usize,
     out: &mut Vec<LocalLeaderboardCandidate<'a>>,
+    metric: LocalScoreMetric,
 ) {
     push_local_leaderboard_candidates_from_dir(
         root,
@@ -937,6 +957,7 @@ fn push_local_leaderboard_candidates_from_root<'a>(
         header_buf,
         next_ordinal,
         out,
+        metric,
     );
     push_local_leaderboard_candidates_from_dir(
         &local_score_shard_dir(root, chart_hash),
@@ -947,6 +968,7 @@ fn push_local_leaderboard_candidates_from_root<'a>(
         header_buf,
         next_ordinal,
         out,
+        metric,
     );
 }
 
@@ -1189,6 +1211,23 @@ pub fn machine_leaderboard_local_from_profiles(
     max_entries: usize,
     use_display_names: bool,
 ) -> Vec<LeaderboardEntry> {
+    machine_leaderboard_local_from_profiles_by(
+        profiles,
+        chart_hash,
+        max_entries,
+        use_display_names,
+        LocalScoreMetric::Itg,
+    )
+}
+
+#[must_use]
+pub fn machine_leaderboard_local_from_profiles_by(
+    profiles: &[LocalScoreProfileSource],
+    chart_hash: &str,
+    max_entries: usize,
+    use_display_names: bool,
+    metric: LocalScoreMetric,
+) -> Vec<LeaderboardEntry> {
     if chart_hash.trim().is_empty() || max_entries == 0 {
         return Vec::new();
     }
@@ -1207,6 +1246,7 @@ pub fn machine_leaderboard_local_from_profiles(
                 &mut header_buf,
                 &mut next_ordinal,
                 &mut candidates,
+                metric,
             );
         } else {
             push_local_leaderboard_candidates_from_root(
@@ -1218,6 +1258,7 @@ pub fn machine_leaderboard_local_from_profiles(
                 &mut header_buf,
                 &mut next_ordinal,
                 &mut candidates,
+                metric,
             );
         }
     }
@@ -1230,6 +1271,23 @@ pub fn personal_leaderboard_local_from_root(
     chart_hash: &str,
     initials: &str,
     max_entries: usize,
+) -> Vec<LeaderboardEntry> {
+    personal_leaderboard_local_from_root_by(
+        root,
+        chart_hash,
+        initials,
+        max_entries,
+        LocalScoreMetric::Itg,
+    )
+}
+
+#[must_use]
+pub fn personal_leaderboard_local_from_root_by(
+    root: &Path,
+    chart_hash: &str,
+    initials: &str,
+    max_entries: usize,
+    metric: LocalScoreMetric,
 ) -> Vec<LeaderboardEntry> {
     if chart_hash.trim().is_empty() || max_entries == 0 {
         return Vec::new();
@@ -1247,6 +1305,7 @@ pub fn personal_leaderboard_local_from_root(
         &mut header_buf,
         &mut next_ordinal,
         &mut candidates,
+        metric,
     );
     local_leaderboard_entries(candidates, max_entries)
 }
@@ -1683,6 +1742,63 @@ mod tests {
         .expect("score fixture should encode");
         fs::write(&path, bytes).expect("score fixture should be writable");
         path
+    }
+
+    fn write_score_with_ex(dir: &Path, chart_hash: &str, played_at_ms: i64, itg: f64, ex: f64) {
+        let mut entry = score_entry(played_at_ms, itg, false, 0);
+        entry.ex_score_percent = ex;
+        fs::create_dir_all(dir).expect("score directory should be creatable");
+        let bytes = encode_local_score_entry(&entry).expect("score fixture should encode");
+        fs::write(dir.join(format!("{chart_hash}-{played_at_ms}.bin")), bytes)
+            .expect("score fixture should be writable");
+    }
+
+    #[test]
+    fn local_leaderboard_ranks_by_selected_metric() {
+        let tree = TempTree::new("leaderboard-metric");
+        // ITG order: 1 > 2 > 3. EX order: 2 > 3 > 1.
+        write_score_with_ex(tree.path(), "chart", 1, 0.99, 80.0);
+        write_score_with_ex(tree.path(), "chart", 2, 0.97, 95.5);
+        write_score_with_ex(tree.path(), "chart", 3, 0.90, 91.25);
+        // A different chart must never leak in.
+        write_score_with_ex(tree.path(), "other", 4, 0.50, 99.0);
+
+        let itg = personal_leaderboard_local_from_root_by(
+            tree.path(),
+            "chart",
+            "AAA",
+            10,
+            LocalScoreMetric::Itg,
+        );
+        let ex = personal_leaderboard_local_from_root_by(
+            tree.path(),
+            "chart",
+            "AAA",
+            10,
+            LocalScoreMetric::Ex,
+        );
+
+        // `score` is hundredths of a percent, so 0.99 -> 9900 and EX 95.5 -> 9550.
+        let scores = |entries: &[LeaderboardEntry]| -> Vec<f64> {
+            entries.iter().map(|entry| entry.score).collect()
+        };
+        assert_eq!(scores(&itg), [9900.0, 9700.0, 9000.0]);
+        assert_eq!(scores(&ex), [9550.0, 9125.0, 8000.0]);
+        assert_eq!(ex.iter().map(|e| e.rank).collect::<Vec<_>>(), [1, 2, 3]);
+
+        // The unsuffixed API stays ITG-ranked.
+        let default = personal_leaderboard_local_from_root(tree.path(), "chart", "AAA", 10);
+        assert_eq!(scores(&default), scores(&itg));
+
+        // Truncation keeps the best by the selected metric.
+        let top1 = personal_leaderboard_local_from_root_by(
+            tree.path(),
+            "chart",
+            "AAA",
+            1,
+            LocalScoreMetric::Ex,
+        );
+        assert_eq!(scores(&top1), [9550.0]);
     }
 
     #[test]

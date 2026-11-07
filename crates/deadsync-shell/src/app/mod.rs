@@ -11837,6 +11837,7 @@ mod tests {
             personal_records: Vec::new(),
             personal_record_highlight_rank: None,
             show_machine_personal_split: false,
+            ex_records: Default::default(),
         }
     }
 

@@ -144,6 +144,7 @@ fn pane_percentage_actor(
             | EvalPane::TimingEx
             | EvalPane::TimingHardEx
             | EvalPane::MachineRecords
+            | EvalPane::MachineRecordsEx
             | EvalPane::QrCode
             | EvalPane::GrooveStats
             | EvalPane::GrooveStatsEx
@@ -190,6 +191,7 @@ fn pane_percentage_actor(
         EvalPane::TimingHardEx => {}
         EvalPane::TimingArrows => {}
         EvalPane::MachineRecords => {}
+        EvalPane::MachineRecordsEx => {}
         EvalPane::QrCode => {}
         EvalPane::GrooveStats => {}
         EvalPane::GrooveStatsEx => {}

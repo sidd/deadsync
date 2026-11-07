@@ -2,10 +2,38 @@ use deadsync_core::input::MAX_PLAYERS;
 use deadsync_online::score_compat as scores;
 use deadsync_profile::player_side_index;
 use deadsync_score::{self as score_data, stage_stats::StageSummary};
+use deadsync_theme::views::ExLocalRecords;
 use deadsync_theme_simply_love::screens::gameplay;
 use deadsync_theme_simply_love::views::{EvaluationContextView, EvaluationInitView, ScoreInfo};
 use std::borrow::Cow;
 use std::ops::Range;
+
+/// Local leaderboards ranked by EX score, for the EX evaluation pane.
+///
+/// `ex_score_percent` uses the 0..100 scale of the stored EX value. Highlights
+/// and the machine/personal split follow the same rules as the ITG pane, and
+/// only apply when the local score counted (`local_score_valid`).
+pub(crate) fn ex_local_records(
+    chart_hash: &str,
+    side: deadsync_profile::PlayerSide,
+    ex_score_percent: f64,
+    local_score_valid: bool,
+) -> ExLocalRecords {
+    let machine = scores::get_machine_leaderboard_local_ex(chart_hash, usize::MAX);
+    let personal = scores::get_personal_leaderboard_local_ex_for_side(chart_hash, side, usize::MAX);
+    let fraction = ex_score_percent / 100.0;
+    let machine_rank = score_data::leaderboard_rank_for_score(machine.as_slice(), fraction);
+    let personal_rank = score_data::leaderboard_rank_for_score(personal.as_slice(), fraction);
+    let earned_machine = local_score_valid && machine_rank.is_some_and(|rank| rank <= 10);
+    let earned_top2_personal = local_score_valid && personal_rank.is_some_and(|rank| rank <= 2);
+    ExLocalRecords {
+        machine,
+        machine_highlight_rank: local_score_valid.then_some(machine_rank).flatten(),
+        personal,
+        personal_highlight_rank: local_score_valid.then_some(personal_rank).flatten(),
+        show_split: !earned_machine && earned_top2_personal,
+    }
+}
 
 /// Adapt an already authoritative result to the current theme's evaluation
 /// view. Artwork, labels and record highlighting do not feed back into it.
@@ -158,6 +186,12 @@ pub(crate) fn evaluation_view(
                 personal_records,
                 personal_record_highlight_rank,
                 show_machine_personal_split,
+                ex_records: ex_local_records(
+                    player.chart.short_hash.as_str(),
+                    side,
+                    player.ex_score_percent,
+                    local_score_valid,
+                ),
             });
     }
     EvaluationInitView {

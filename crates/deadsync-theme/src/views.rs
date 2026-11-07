@@ -319,6 +319,21 @@ pub struct EvaluationView<N, S> {
     pub personal_records: Vec<LeaderboardEntry>,
     pub personal_record_highlight_rank: Option<u32>,
     pub show_machine_personal_split: bool,
+    /// Local leaderboards ranked by EX score (extra evaluation pane).
+    pub ex_records: ExLocalRecords,
+}
+
+/// Local machine/personal leaderboards ranked by EX score.
+///
+/// Mirrors the ITG-ranked `machine_records`/`personal_records` fields on
+/// [`EvaluationView`] so the EX pane can reuse the same row layout.
+#[derive(Clone, Debug, Default)]
+pub struct ExLocalRecords {
+    pub machine: Vec<LeaderboardEntry>,
+    pub machine_highlight_rank: Option<u32>,
+    pub personal: Vec<LeaderboardEntry>,
+    pub personal_highlight_rank: Option<u32>,
+    pub show_split: bool,
 }
 
 impl<N, S> EvaluationView<N, S> {
