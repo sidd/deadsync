@@ -517,6 +517,8 @@ fn menu_info_text(state: &State, update_banner_tag: Option<&str>) -> Arc<str> {
 
     let version = deadsync_version::current().to_string();
     let mut version_line = tr_fmt("Menu", "VersionLine", &[("version", &version)]).to_string();
+    // Fork marker (not localized on purpose: keeps the language files merge-clean).
+    version_line.push_str(" (sidd fork)");
     if let Some(tag) = key.banner_tag.as_deref() {
         let suffix = tr_fmt("Menu", "UpdateAvailableSuffix", &[("version", tag)]);
         version_line.push(' ');
