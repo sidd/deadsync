@@ -300,6 +300,8 @@ pub(super) fn submenu_display_choice_texts(
         choice_texts[0] = Arc::from(format_percent(state.assist_tick_volume_pct));
     } else if row.id == SubRowId::MusicVolume {
         choice_texts[0] = Arc::from(format_percent(state.music_volume_pct));
+    } else if row.id == SubRowId::MenuMusicVolume {
+        choice_texts[0] = Arc::from(format_percent(state.menu_music_volume_pct));
     } else if row.id == SubRowId::SmxDefaultLightBrightness {
         choice_texts[0] = Arc::from(format_percent(state.smx_default_light_brightness_pct));
     } else if row.id == SubRowId::VisualDelay {

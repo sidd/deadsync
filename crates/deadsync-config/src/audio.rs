@@ -1,7 +1,7 @@
 use crate::bools::{parse_bool_str, parse_u8_bool_or_default};
 use crate::defaults::{
     DEFAULT_ASSIST_TICK_VOLUME, DEFAULT_CUSTOM_SOUNDS_ENABLED, DEFAULT_ENABLE_REPLAYGAIN,
-    DEFAULT_MASTER_VOLUME, DEFAULT_MENU_MUSIC, DEFAULT_MUSIC_VOLUME,
+    DEFAULT_MASTER_VOLUME, DEFAULT_MENU_MUSIC, DEFAULT_MENU_MUSIC_VOLUME, DEFAULT_MUSIC_VOLUME,
     DEFAULT_MUSIC_WHEEL_SWITCH_SPEED, DEFAULT_RATE_MOD_PRESERVES_PITCH, DEFAULT_SFX_VOLUME,
     DEFAULT_TAB_ACCELERATION, DEFAULT_VISUAL_DELAY_SECONDS, DEFAULT_WRITE_CURRENT_SCREEN,
 };
@@ -99,6 +99,8 @@ pub struct AudioOptions {
     pub music_wheel_switch_speed: u8,
     pub sfx_volume: u8,
     pub assist_tick_volume: u8,
+    /// Percent of the music volume used outside gameplay (menus, song preview).
+    pub menu_music_volume: u8,
     pub output_device_index: Option<u16>,
     pub sample_rate_hz: Option<u32>,
     pub rate_mod_preserves_pitch: bool,
@@ -119,6 +121,7 @@ impl Default for AudioOptions {
             music_wheel_switch_speed: DEFAULT_MUSIC_WHEEL_SWITCH_SPEED,
             sfx_volume: DEFAULT_SFX_VOLUME,
             assist_tick_volume: DEFAULT_ASSIST_TICK_VOLUME,
+            menu_music_volume: DEFAULT_MENU_MUSIC_VOLUME,
             output_device_index: None,
             sample_rate_hz: None,
             rate_mod_preserves_pitch: DEFAULT_RATE_MOD_PRESERVES_PITCH,
@@ -202,6 +205,10 @@ pub fn load_audio_options(conf: &SimpleIni, default: AudioOptions) -> AudioOptio
             .get("Options", "AssistTickVolume")
             .and_then(|value| value.parse().ok())
             .map_or(default.assist_tick_volume, clamp_audio_volume_percent),
+        menu_music_volume: conf
+            .get("Options", "MenuMusicVolume")
+            .and_then(|value| value.parse().ok())
+            .map_or(default.menu_music_volume, clamp_audio_volume_percent),
         output_device_index: conf
             .get("Options", "AudioOutputDevice")
             .and_then(parse_auto_audio_output_device)
@@ -275,6 +282,7 @@ pub fn push_audio_music_option_lines(content: &mut String, options: AudioOptions
 }
 
 pub fn push_audio_tail_option_lines(content: &mut String, options: AudioOptions) {
+    push_line(content, "MenuMusicVolume", options.menu_music_volume);
     push_line(content, "AssistTickVolume", options.assist_tick_volume);
     push_line(content, "SFXVolume", options.sfx_volume);
     push_bool(content, "TabAcceleration", options.tab_acceleration);
@@ -355,6 +363,7 @@ mod tests {
             music_wheel_switch_speed: 15,
             sfx_volume: 80,
             assist_tick_volume: 50,
+            menu_music_volume: 100,
             output_device_index: None,
             sample_rate_hz: None,
             rate_mod_preserves_pitch: true,
@@ -497,6 +506,7 @@ mod tests {
         let mut content = String::new();
         let mut options = default_options();
         options.assist_tick_volume = 31;
+        options.menu_music_volume = 35;
         options.sfx_volume = 42;
         options.tab_acceleration = false;
         options.write_current_screen = true;
@@ -507,6 +517,7 @@ mod tests {
         assert_eq!(
             content,
             concat!(
+                "MenuMusicVolume=35\n",
                 "AssistTickVolume=31\n",
                 "SFXVolume=42\n",
                 "TabAcceleration=0\n",
@@ -530,6 +541,7 @@ mod tests {
             MusicWheelSwitchSpeed=0
             SFXVolume=101
             AssistTickVolume=17
+            MenuMusicVolume=44
             AudioOutputDevice=3
             AudioSampleRateHz=48000
             RateModPreservesPitch=0
@@ -550,6 +562,7 @@ mod tests {
         assert_eq!(loaded.music_wheel_switch_speed, 1);
         assert_eq!(loaded.sfx_volume, 100);
         assert_eq!(loaded.assist_tick_volume, 17);
+        assert_eq!(loaded.menu_music_volume, 44);
         assert_eq!(loaded.output_device_index, Some(3));
         assert_eq!(loaded.sample_rate_hz, Some(48_000));
         assert!(!loaded.rate_mod_preserves_pitch);

@@ -95,6 +95,8 @@ pub const DEFAULT_MASTER_VOLUME: u8 = 90;
 pub const DEFAULT_MENU_MUSIC: bool = true;
 pub const DEFAULT_CUSTOM_SOUNDS_ENABLED: bool = true;
 pub const DEFAULT_MUSIC_VOLUME: u8 = 100;
+/// Percent of the music volume applied outside gameplay (menus, song preview).
+pub const DEFAULT_MENU_MUSIC_VOLUME: u8 = 100;
 pub const DEFAULT_MUSIC_WHEEL_SWITCH_SPEED: u8 = 15;
 pub const DEFAULT_ASSIST_TICK_VOLUME: u8 = 100;
 pub const DEFAULT_SFX_VOLUME: u8 = 100;

@@ -110,6 +110,13 @@ pub fn set_sfx_volume(cfg: &mut Config, volume: u8) -> bool {
     set_if_changed(&mut cfg.sfx_volume, clamp_audio_volume_percent(volume))
 }
 
+pub fn set_menu_music_volume(cfg: &mut Config, volume: u8) -> bool {
+    set_if_changed(
+        &mut cfg.menu_music_volume,
+        clamp_audio_volume_percent(volume),
+    )
+}
+
 pub fn set_assist_tick_volume(cfg: &mut Config, volume: u8) -> bool {
     set_if_changed(
         &mut cfg.assist_tick_volume,

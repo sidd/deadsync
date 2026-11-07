@@ -60,6 +60,7 @@ pub enum SubRowId {
     SfxVolume,
     AssistTickVolume,
     MusicVolume,
+    MenuMusicVolume,
     MineSounds,
     GlobalOffset,
     RateModPreservesPitch,

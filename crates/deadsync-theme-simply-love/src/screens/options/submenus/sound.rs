@@ -66,6 +66,12 @@ pub(in crate::screens::options) const SOUND_OPTIONS_ROWS: &[SubRow] = &[
         inline: false,
     },
     SubRow {
+        id: SubRowId::MenuMusicVolume,
+        label: lookup_key("OptionsSound", "MenuMusicVolume"),
+        choices: &[literal_choice("100%")],
+        inline: false,
+    },
+    SubRow {
         id: SubRowId::MineSounds,
         label: lookup_key("OptionsSound", "MineSounds"),
         choices: &[
@@ -183,6 +189,14 @@ pub(in crate::screens::options) const SOUND_OPTIONS_ITEMS: &[Item] = &[
         help: &[HelpEntry::Paragraph(lookup_key(
             "OptionsSoundHelp",
             "MusicVolumeHelp",
+        ))],
+    },
+    Item {
+        id: ItemId::SndMenuMusicVolume,
+        name: lookup_key("OptionsSound", "MenuMusicVolume"),
+        help: &[HelpEntry::Paragraph(lookup_key(
+            "OptionsSoundHelp",
+            "MenuMusicVolumeHelp",
         ))],
     },
     Item {

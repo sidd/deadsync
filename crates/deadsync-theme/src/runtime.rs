@@ -57,6 +57,8 @@ pub enum AudioRequest {
 pub enum AudioVolumeTarget {
     Master,
     Music,
+    /// Percent of `Music` used outside gameplay (menus, song preview).
+    MenuMusic,
     Sfx,
     AssistTick,
 }

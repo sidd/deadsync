@@ -265,6 +265,7 @@ pub struct State {
     pub(super) sfx_volume_pct: i32,
     pub(super) assist_tick_volume_pct: i32,
     pub(super) music_volume_pct: i32,
+    pub(super) menu_music_volume_pct: i32,
     pub(super) smx_default_light_brightness_pct: i32,
     pub(super) global_offset_ms: i32,
     pub(super) visual_delay_ms: i32,
@@ -394,6 +395,7 @@ pub fn init(view: OptionsInitView) -> State {
     let sfx_volume_pct = i32::from(audio_options.sfx_volume.min(100));
     let assist_tick_volume_pct = i32::from(audio_options.assist_tick_volume.min(100));
     let music_volume_pct = i32::from(audio_options.music_volume.min(100));
+    let menu_music_volume_pct = i32::from(audio_options.menu_music_volume.min(100));
     #[cfg(target_os = "linux")]
     let linux_backend_choices = build_linux_backend_choices(&audio_options);
     let smx_assignment_status = smx_assignment_status(&smx_assignment);
@@ -512,6 +514,7 @@ pub fn init(view: OptionsInitView) -> State {
         sfx_volume_pct,
         assist_tick_volume_pct,
         music_volume_pct,
+        menu_music_volume_pct,
         smx_default_light_brightness_pct: i32::from(cfg.smx_default_light_brightness.min(100)),
         global_offset_ms: {
             let ms = (cfg.global_offset_seconds * 1000.0).round() as i32;

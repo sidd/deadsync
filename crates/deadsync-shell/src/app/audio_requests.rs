@@ -85,6 +85,7 @@ pub(super) fn options_view(audio: &deadsync_audio_stream::AudioControl) -> Audio
         replay_gain: cfg.enable_replaygain,
         master_volume: cfg.master_volume,
         music_volume: cfg.music_volume,
+        menu_music_volume: cfg.menu_music_volume,
         sfx_volume: cfg.sfx_volume,
         assist_tick_volume: cfg.assist_tick_volume,
     }
@@ -146,6 +147,7 @@ pub(super) fn execute(audio: &mut AudioControl, sounds: &UiSfx, request: AudioRe
         AudioRequest::SetVolume { target, percent } => match target {
             AudioVolumeTarget::Master => config::runtime_update::update_master_volume(percent),
             AudioVolumeTarget::Music => config::runtime_update::update_music_volume(percent),
+            AudioVolumeTarget::MenuMusic => config::runtime_update::update_menu_music_volume(percent),
             AudioVolumeTarget::Sfx => config::runtime_update::update_sfx_volume(percent),
             AudioVolumeTarget::AssistTick => {
                 config::runtime_update::update_assist_tick_volume(percent)

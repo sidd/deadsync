@@ -8,7 +8,10 @@ mod runtime;
 mod sfx_cache;
 
 pub use clock::timing_diag_enabled;
-pub use mix::{AudioMixLevels, audio_mix_levels, set_audio_mix_levels};
+pub use mix::{
+    AudioMixLevels, audio_mix_levels, set_audio_mix_levels, set_menu_music_active,
+    set_menu_music_scale,
+};
 pub use music_map::MusicClock;
 #[cfg(target_os = "linux")]
 pub use runtime::available_linux_backends;

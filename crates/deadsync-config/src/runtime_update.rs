@@ -279,6 +279,11 @@ pub fn update_sfx_volume(volume: u8) {
     }
 }
 
+pub fn update_menu_music_volume(volume: u8) {
+    update_config(|cfg| config_update::set_menu_music_volume(cfg, volume));
+    deadsync_audio_stream::set_menu_music_scale(volume);
+}
+
 pub fn update_assist_tick_volume(volume: u8) {
     if let Some(levels) = RUNTIME_CONFIG.update_assist_tick_volume(volume) {
         deadsync_audio_stream::set_audio_mix_levels(levels);

@@ -69,6 +69,7 @@ fn publish_config(effects: PublishedConfigEffects) {
 
 fn apply_published_config_effects(effects: PublishedConfigEffects) {
     deadsync_audio_stream::set_audio_mix_levels(effects.audio_mix_levels);
+    deadsync_audio_stream::set_menu_music_scale(effects.menu_music_volume);
     deadsync_audio_stream::set_replaygain_enabled(effects.replaygain_enabled);
     deadsync_audio_stream::set_preserve_pitch_enabled(effects.preserve_pitch_enabled);
     let (translate_x, translate_y, add_width, add_height) = effects.overscan;

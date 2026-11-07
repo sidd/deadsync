@@ -341,6 +341,7 @@ const fn apply_audio_opts(
     cfg.music_wheel_switch_speed = loaded.music_wheel_switch_speed;
     cfg.sfx_volume = loaded.sfx_volume;
     cfg.assist_tick_volume = loaded.assist_tick_volume;
+    cfg.menu_music_volume = loaded.menu_music_volume;
     cfg.audio_output_device_index = loaded.output_device_index;
     cfg.audio_sample_rate_hz = loaded.sample_rate_hz;
     cfg.rate_mod_preserves_pitch = loaded.rate_mod_preserves_pitch;
