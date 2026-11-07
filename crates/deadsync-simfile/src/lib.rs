@@ -20,6 +20,7 @@ pub mod song_sort;
 pub mod stats;
 pub mod sync_offset;
 pub mod tags;
+pub mod tech_annotations;
 pub mod timing;
 
 #[cfg(test)]

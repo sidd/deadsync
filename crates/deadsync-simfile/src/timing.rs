@@ -30,7 +30,7 @@ pub struct CrossoverAnnotation {
 }
 
 #[inline]
-fn foot_masks(annotation: &rssp::RowAnnotation) -> (u8, u8) {
+pub(crate) fn foot_masks(annotation: &rssp::RowAnnotation) -> (u8, u8) {
     let mut left = 0u8;
     let mut right = 0u8;
     for (lane, &foot) in annotation.feet().iter().enumerate() {
@@ -316,7 +316,9 @@ pub fn timing_segments_from_rssp(segments: &rssp_timing::TimingSegments) -> Timi
 /// into the `rssp` timing-segment form so the parity/annotation engine can be
 /// driven from deadsync chart data. Offsets are intentionally not encoded here;
 /// callers that need absolute times use deadsync's own `TimingData` instead.
-fn rssp_timing_segments_from_deadsync(segments: &TimingSegments) -> rssp_timing::TimingSegments {
+pub(crate) fn rssp_timing_segments_from_deadsync(
+    segments: &TimingSegments,
+) -> rssp_timing::TimingSegments {
     rssp_timing::TimingSegments {
         beat0_offset_adjust: segments.beat0_offset_adjust,
         bpms: segments.bpms.clone(),
