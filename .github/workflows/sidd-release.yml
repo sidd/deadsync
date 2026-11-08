@@ -33,6 +33,9 @@ concurrency:
 env:
   UPSTREAM_URL: https://github.com/pnn64/deadsync.git
   GH_TOKEN: ${{ github.token }}
+  # Pin gh to this fork. Without it gh resolves the base repo from git remotes
+  # and, for a fork with an `upstream` remote, targets the parent project.
+  GH_REPO: ${{ github.repository }}
 
 jobs:
   release:
