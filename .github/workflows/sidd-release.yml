@@ -144,9 +144,11 @@ jobs:
           new_pkg="$(cd repo-out && ls deadsync-sidd-*.pkg.tar.zst)"
           gh release upload repo repo-out/* --clobber
           # Remove superseded packages only after the new one is up.
+          # `|| true`: grep exits 1 when nothing matches (no older package yet),
+          # which would otherwise fail the step under pipefail.
           gh release view repo --json assets -q '.assets[].name' \
-            | grep -E '^deadsync-sidd-.*\.pkg\.tar\.zst$' \
-            | grep -vx "$new_pkg" \
+            | { grep -E '^deadsync-sidd-.*\.pkg\.tar\.zst$' || true; } \
+            | { grep -vx "$new_pkg" || true; } \
             | while read -r old; do gh release delete-asset repo "$old" -y; done
 
       - name: Keepalive (GitHub disables schedules after 60 quiet days)
