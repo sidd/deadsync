@@ -26,13 +26,18 @@ box: pacman -Syu / paru  <------------  https://github.com/sidd/deadsync/release
   stack itself changes.
 - Version = upstream version; `pkgrel` = CI run number, so a rebuilt patch
   stack always upgrades.
-- If the replay conflicts, the `resolve` job runs Claude Code (prompt in
-  `scripts/sidd/resolve-prompt.md`). It rebases `sidd` onto the new tag, resolves
-  conflicts, and must pass `cargo check` + unit tests; CI then pushes the rebased
-  branch (force-with-lease) and re-runs the build. If that fails, an issue is
-  opened and the box stays on its current version. Needs repo secret
+- Every new upstream release first goes through `sidd-reconcile` (every 6h, or
+  dispatched by sidd-release). It runs Claude Code with
+  `scripts/sidd/resolve-prompt.md`, which (1) drops any of our patches that
+  upstream now provides, (2) rebases `sidd` onto the tag and resolves conflicts,
+  (3) must pass `cargo check` + unit tests. CI re-verifies, pushes the rebased
+  branch (force-with-lease), records the tag in the `reconciled.txt` asset of the
+  `repo` release, and dispatches the build. sidd-release will not build an
+  unreconciled upstream tag. On failure an issue is opened, the tag is recorded
+  as `failed-<tag>` and the box keeps its current package until a human rebases
+  or re-runs sidd-reconcile with `force`. Needs repo secret
   `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`) or `ANTHROPIC_API_KEY`.
-  Manual fallback: rebase `sidd` onto the new tag locally, resolve, push.
+  Only tagged releases are watched, not upstream `master`.
 - GitHub disables scheduled workflows after 60 days without repo activity; the
   job pushes a tiny commit to a `keepalive` branch every ~20 days to prevent that.
 

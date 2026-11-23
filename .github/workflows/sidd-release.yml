@@ -17,7 +17,7 @@ on:
         type: boolean
         default: false
       after_resolve:
-        description: "Set by the resolve job; stops a conflict from looping"
+        description: "Set by sidd-reconcile; skips the reconcile gate so nothing loops"
         type: boolean
         default: false
   push:
@@ -46,9 +46,6 @@ jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 150
-    outputs:
-      conflict: ${{ steps.replay.outputs.conflict }}
-      tag: ${{ steps.up.outputs.tag }}
     steps:
       - name: Checkout patch stack
         uses: actions/checkout@v4
@@ -81,7 +78,9 @@ jobs:
         shell: bash
         env:
           STATE: ${{ steps.up.outputs.state }}
+          TAG: ${{ steps.up.outputs.tag }}
           FORCE: ${{ inputs.force }}
+          AFTER_RESOLVE: ${{ inputs.after_resolve }}
         run: |
           set -euo pipefail
           mkdir -p prev-state
@@ -90,10 +89,32 @@ jobs:
              && [ "$(cat prev-state/state.txt)" = "$STATE" ]; then
             echo "build=false" >> "$GITHUB_OUTPUT"
             echo "Already published for: $STATE"
-          else
-            echo "build=true" >> "$GITHUB_OUTPUT"
-            echo "Needs build for: $STATE"
+            exit 0
           fi
+          # A new upstream release must be reconciled (obsolete patches retired,
+          # conflicts resolved) by sidd-reconcile before we build it.
+          if [ "${AFTER_RESOLVE:-false}" != "true" ]; then
+            recon=""
+            gh release download repo -p reconciled.txt -D prev-state --clobber 2>/dev/null \
+              && recon="$(cat prev-state/reconciled.txt)" || true
+            if [ "$recon" = "failed-$TAG" ]; then
+              echo "build=false" >> "$GITHUB_OUTPUT"
+              echo "Reconcile of $TAG failed earlier; waiting for a human (see open issues)."
+              exit 0
+            elif [ "$recon" != "$TAG" ]; then
+              echo "build=false" >> "$GITHUB_OUTPUT"
+              echo "reconcile=1" >> "$GITHUB_OUTPUT"
+              echo "$TAG is not reconciled yet; asking sidd-reconcile."
+              exit 0
+            fi
+          fi
+          echo "build=true" >> "$GITHUB_OUTPUT"
+          echo "Needs build for: $STATE"
+
+      - name: Ask sidd-reconcile to process the new release
+        if: steps.need.outputs.reconcile == '1'
+        shell: bash
+        run: gh workflow run sidd-reconcile.yml --ref sidd
 
       - name: Replay patches onto the upstream release
         id: replay
@@ -101,6 +122,7 @@ jobs:
         shell: bash
         env:
           TAG: ${{ steps.up.outputs.tag }}
+          AFTER_RESOLVE: ${{ inputs.after_resolve }}
         run: |
           set -euo pipefail
           git config user.name "sidd-release"
@@ -111,9 +133,14 @@ jobs:
           if ! git rebase "refs/tags/upstream-${TAG}"; then
             git status --short | head -20
             git rebase --abort || true
-            # Not a failure: the `resolve` job below fixes the stack with Claude.
-            echo "conflict=1" >> "$GITHUB_OUTPUT"
-            exit 0
+            if [ "${AFTER_RESOLVE:-false}" != "true" ]; then
+              # Not a failure yet: hand it to Claude via sidd-reconcile.
+              echo "conflict=1" >> "$GITHUB_OUTPUT"
+              gh workflow run sidd-reconcile.yml --ref sidd -f force=true
+              exit 0
+            fi
+            echo "REBASE_CONFLICT=1" >> "$GITHUB_ENV"
+            exit 1
           fi
           git log --oneline "refs/tags/upstream-${TAG}..HEAD"
 
@@ -187,109 +214,8 @@ jobs:
         run: |
           set -euo pipefail
           title="sidd-release failed"
+          [ "${REBASE_CONFLICT:-0}" = "1" ] && title="Patches still conflict with upstream ${TAG} after reconcile"
           body="Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          if ! gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&per_page=100" -q '.[].title' | grep -qxF "$title"; then
-            gh api "repos/${GITHUB_REPOSITORY}/issues" -f title="$title" -f body="$body" >/dev/null
-          fi
-
-  # The patch stack conflicts with a new upstream release (this will keep
-  # happening). Let Claude rebase it, prove it compiles and passes tests, push
-  # the rebased branch, and re-run the build. Needs one repo secret:
-  # CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) or ANTHROPIC_API_KEY.
-  resolve:
-    needs: release
-    if: needs.release.outputs.conflict == '1' && inputs.after_resolve != true
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    env:
-      TAG: ${{ needs.release.outputs.tag }}
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-    steps:
-      - name: Checkout patch stack
-        uses: actions/checkout@v4
-        with:
-          ref: sidd
-          fetch-depth: 0
-
-      - name: Require credentials
-        shell: bash
-        run: |
-          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN}${ANTHROPIC_API_KEY}" ]; then
-            echo "Set repo secret CLAUDE_CODE_OAUTH_TOKEN (claude setup-token) or ANTHROPIC_API_KEY." >&2
-            exit 1
-          fi
-
-      - name: Install build dependencies
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y \
-            build-essential pkg-config cmake ninja-build libclang-dev libdbus-1-dev \
-            libasound2-dev libpipewire-0.3-dev libx11-dev libx11-xcb-dev libxi-dev \
-            libxcursor-dev libxrandr-dev libxinerama-dev libwayland-dev libxkbcommon-dev \
-            libvulkan-dev libudev-dev libgl1-mesa-dev libxcb1-dev libxcb-randr0-dev
-          rustup update stable && rustup default stable
-          npm install -g @anthropic-ai/claude-code
-
-      - name: Let Claude rebase onto the new release
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "sidd-release"
-          git config user.email "sidd-release@users.noreply.github.com"
-          git remote add upstream "$UPSTREAM_URL"
-          git fetch --no-tags upstream "refs/tags/${TAG}:refs/tags/upstream-${TAG}"
-          echo "ORIG=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-          git checkout -B work
-          prompt="$(sed "s/\$TAG/${TAG}/g" scripts/sidd/resolve-prompt.md)"
-          claude -p "$prompt" \
-            --permission-mode acceptEdits \
-            --max-turns 120 \
-            --allowedTools "Read" "Edit" "Write" "Grep" "Glob" "Bash(git:*)" "Bash(cargo:*)" "Bash(ls:*)" "Bash(sed:*)" "Bash(grep:*)" \
-            --disallowedTools "Bash(git push:*)" "Bash(git remote:*)"
-
-      - name: Verify the result independently
-        shell: bash
-        run: |
-          set -euo pipefail
-          [ ! -e .git/rebase-merge ] && [ ! -e .git/rebase-apply ] || { echo "rebase unfinished" >&2; exit 1; }
-          git merge-base --is-ancestor "refs/tags/upstream-${TAG}" HEAD
-          [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "dirty tree" >&2; exit 1; }
-          # The agent must not rewrite the machinery that runs it.
-          git diff --quiet "$ORIG" HEAD -- .github/workflows/sidd-release.yml packaging scripts/sidd \
-            || { echo "agent modified protected files" >&2; exit 1; }
-          # Upstream workflow files can't be pushed with GITHUB_TOKEN; keep ours.
-          if ! git diff --quiet "$ORIG" HEAD -- .github/workflows; then
-            git checkout "$ORIG" -- .github/workflows
-            git add -A .github/workflows
-            git commit -m "ci: keep fork workflow files (GITHUB_TOKEN cannot update workflows)"
-          fi
-          cargo check -p deadsync-shell --locked
-          cargo test -p deadsync-score -p deadsync-audio-stream -p deadsync-config --lib --locked
-          git log --oneline "refs/tags/upstream-${TAG}..HEAD"
-
-      - name: Push rebased stack and re-run the build
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          git push --force-with-lease="sidd:${ORIG}" origin HEAD:refs/heads/sidd
-          # Pushes made with GITHUB_TOKEN do not trigger workflows; dispatch explicitly.
-          gh workflow run sidd-release.yml --ref sidd -f after_resolve=true
-
-      - name: Report failure as an issue
-        if: failure()
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          title="Patches no longer apply on upstream ${TAG} (auto-resolve failed)"
-          body="Claude could not produce a verified rebase. The box keeps its current package. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           if ! gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&per_page=100" -q '.[].title' | grep -qxF "$title"; then
             gh api "repos/${GITHUB_REPOSITORY}/issues" -f title="$title" -f body="$body" >/dev/null
           fi

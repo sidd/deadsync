@@ -1,0 +1,190 @@
+name: sidd-reconcile
+
+# For every new upstream release: let Claude (1) retire patches upstream now
+# provides, (2) rebase the stack onto the release and resolve conflicts, then
+# prove it compiles and passes tests. The result is pushed to `sidd` and the
+# release workflow is dispatched to build it. The processed tag is recorded in
+# the `reconciled.txt` asset of the `repo` release; sidd-release will not build
+# a new upstream tag until it has been reconciled.
+#
+# Needs repo secret CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`) or
+# ANTHROPIC_API_KEY.
+
+on:
+  schedule:
+    - cron: "47 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Reconcile even if this tag was already processed (or failed)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+# Separate from sidd-release: GitHub keeps only one pending run per group, so
+# sharing a group would let one workflow cancel the other's queued run.
+concurrency:
+  group: sidd-reconcile
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_URL: https://github.com/pnn64/deadsync.git
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+  CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout patch stack
+        uses: actions/checkout@v4
+        with:
+          ref: sidd
+          fetch-depth: 0
+
+      - name: Find the newest upstream release and whether it needs reconciling
+        id: up
+        shell: bash
+        env:
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          tag="$(git ls-remote --tags --refs "$UPSTREAM_URL" 'v*' \
+            | sed 's|.*refs/tags/||' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V | tail -1)"
+          [ -n "$tag" ] || { echo "no upstream release tag found" >&2; exit 1; }
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          mkdir -p prev-state
+          recon=""
+          if gh release download repo -p reconciled.txt -D prev-state --clobber 2>/dev/null; then
+            recon="$(cat prev-state/reconciled.txt)"
+          fi
+          if [ "${FORCE:-false}" != "true" ] && { [ "$recon" = "$tag" ] || [ "$recon" = "failed-$tag" ]; }; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Already handled ${tag} (${recon})"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Reconciling against ${tag} (previous: ${recon:-none})"
+          fi
+
+      - name: Require credentials
+        if: steps.up.outputs.run == 'true'
+        shell: bash
+        run: |
+          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN}${ANTHROPIC_API_KEY}" ]; then
+            echo "Set repo secret CLAUDE_CODE_OAUTH_TOKEN (claude setup-token) or ANTHROPIC_API_KEY." >&2
+            exit 1
+          fi
+
+      - name: Install build dependencies
+        if: steps.up.outputs.run == 'true'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential pkg-config cmake ninja-build libclang-dev libdbus-1-dev \
+            libasound2-dev libpipewire-0.3-dev libx11-dev libx11-xcb-dev libxi-dev \
+            libxcursor-dev libxrandr-dev libxinerama-dev libwayland-dev libxkbcommon-dev \
+            libvulkan-dev libudev-dev libgl1-mesa-dev libxcb1-dev libxcb-randr0-dev
+          rustup update stable && rustup default stable
+          npm install -g @anthropic-ai/claude-code
+
+      - name: Let Claude retire obsolete patches and rebase
+        if: steps.up.outputs.run == 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.up.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "sidd-release"
+          git config user.email "sidd-release@users.noreply.github.com"
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch --no-tags upstream "refs/tags/${TAG}:refs/tags/upstream-${TAG}"
+          echo "ORIG=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          old_base="$(git merge-base HEAD "refs/tags/upstream-${TAG}")"
+          git checkout -B work
+          prompt="$(sed -e "s/\$TAG/${TAG}/g" -e "s/\$OLD_BASE/${old_base}/g" scripts/sidd/resolve-prompt.md)"
+          claude -p "$prompt" \
+            --permission-mode acceptEdits \
+            --max-turns 150 \
+            --allowedTools "Read" "Edit" "Write" "Grep" "Glob" "Bash(git:*)" "Bash(cargo:*)" "Bash(ls:*)" "Bash(sed:*)" "Bash(grep:*)" \
+            --disallowedTools "Bash(git push:*)" "Bash(git remote:*)" | tee claude-summary.txt
+
+      - name: Verify the result independently
+        if: steps.up.outputs.run == 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.up.outputs.tag }}
+        run: |
+          set -euo pipefail
+          [ ! -e .git/rebase-merge ] && [ ! -e .git/rebase-apply ] || { echo "rebase unfinished" >&2; exit 1; }
+          git merge-base --is-ancestor "refs/tags/upstream-${TAG}" HEAD
+          [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "dirty tree" >&2; exit 1; }
+          # The agent must not rewrite the machinery that runs it.
+          git diff --quiet "$ORIG" HEAD -- .github/workflows/sidd-release.yml .github/workflows/sidd-reconcile.yml packaging scripts/sidd \
+            || { echo "agent modified protected files" >&2; exit 1; }
+          # Upstream workflow files can't be pushed with GITHUB_TOKEN; keep ours.
+          if ! git diff --quiet "$ORIG" HEAD -- .github/workflows; then
+            git checkout "$ORIG" -- .github/workflows
+            git add -A .github/workflows
+            git commit -m "ci: keep fork workflow files (GITHUB_TOKEN cannot update workflows)"
+          fi
+          cargo check -p deadsync-shell --locked
+          cargo test -p deadsync-score -p deadsync-audio-stream -p deadsync-config --lib --locked
+          git log --oneline "refs/tags/upstream-${TAG}..HEAD"
+
+      - name: Push the stack
+        if: steps.up.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse HEAD)" != "$ORIG" ]; then
+            git push --force-with-lease="sidd:${ORIG}" origin HEAD:refs/heads/sidd
+          else
+            echo "Stack unchanged."
+          fi
+
+      - name: Record the release as reconciled
+        if: always() && steps.up.outputs.run == 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.up.outputs.tag }}
+          OUTCOME: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          mkdir -p rec
+          if [ "$OUTCOME" = "success" ]; then printf '%s\n' "$TAG" > rec/reconciled.txt
+          else printf '%s\n' "failed-$TAG" > rec/reconciled.txt; fi
+          if ! gh release view repo >/dev/null 2>&1; then
+            gh release create repo --target sidd --title "pacman repo (sidd)" \
+              --notes "Binary pacman repo consumed by the dance box. Not meant to be downloaded by hand."
+          fi
+          gh release upload repo rec/reconciled.txt --clobber
+
+      - name: Build the reconciled stack
+        if: success() && steps.up.outputs.run == 'true'
+        shell: bash
+        run: |
+          # Pushes made with GITHUB_TOKEN do not trigger workflows; dispatch explicitly.
+          gh workflow run sidd-release.yml --ref sidd -f after_resolve=true
+
+      - name: Report failure as an issue
+        if: failure()
+        shell: bash
+        env:
+          TAG: ${{ steps.up.outputs.tag }}
+        run: |
+          set -euo pipefail
+          title="sidd-reconcile failed for upstream ${TAG}"
+          body="Claude could not produce a verified rebase, so the box keeps its current package and sidd-release will not build this tag until it is fixed (rebase \`sidd\` by hand, or re-run sidd-reconcile with force). Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if ! gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&per_page=100" -q '.[].title' | grep -qxF "$title"; then
+            gh api "repos/${GITHUB_REPOSITORY}/issues" -f title="$title" -f body="$body" >/dev/null
+          fi
