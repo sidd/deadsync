@@ -26,8 +26,13 @@ box: pacman -Syu / paru  <------------  https://github.com/sidd/deadsync/release
   stack itself changes.
 - Version = upstream version; `pkgrel` = CI run number, so a rebuilt patch
   stack always upgrades.
-- If the replay conflicts, the job opens an issue and the box stays on its
-  current version. Fix: rebase `sidd` onto the new tag locally, resolve, push.
+- If the replay conflicts, the `resolve` job runs Claude Code (prompt in
+  `scripts/sidd/resolve-prompt.md`). It rebases `sidd` onto the new tag, resolves
+  conflicts, and must pass `cargo check` + unit tests; CI then pushes the rebased
+  branch (force-with-lease) and re-runs the build. If that fails, an issue is
+  opened and the box stays on its current version. Needs repo secret
+  `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`) or `ANTHROPIC_API_KEY`.
+  Manual fallback: rebase `sidd` onto the new tag locally, resolve, push.
 - GitHub disables scheduled workflows after 60 days without repo activity; the
   job pushes a tiny commit to a `keepalive` branch every ~20 days to prevent that.
 
