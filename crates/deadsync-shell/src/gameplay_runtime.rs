@@ -534,6 +534,7 @@ pub(crate) fn exit<P: GameplayLivePresentation<GameplayCoreState>>(
     state: &mut GameplayHost<GameplayLobbySession, P>,
     cursor: &mut GameplayTelemetryCursor,
 ) {
+    crate::play_events::ended(&state.stage.gameplay, false);
     // Always clear both pads, including one whose config was unavailable on
     // enter. Otherwise the SDK keeps streaming sensor data after gameplay.
     for pad in 0..2 {
@@ -657,6 +658,7 @@ pub(crate) fn enter<P: GameplayLivePresentation<GameplayCoreState>>(
     *telemetry = GameplayTelemetryCursor::default();
     enter_smx_sensors(state, telemetry, smx_input);
     drain(state, audio, sounds, music_clock);
+    crate::play_events::started(&state.stage.gameplay, &state.pack_group);
 }
 
 const MAX_UPDATE_EFFECTS: usize = 6;
@@ -712,6 +714,7 @@ where
         |effect| effects.push(GameplayFrameEffect::Session(effect)),
         |game, delta| presentation.update_gameplay_visuals(game, delta),
     );
+    crate::play_events::frame(&stage.gameplay);
     let output = stage.take_output();
     for command in output.actor_sounds {
         use deadsync_song_lua::SongLuaActorSound;

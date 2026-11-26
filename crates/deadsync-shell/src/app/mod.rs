@@ -5472,6 +5472,7 @@ impl App {
         music_clock: deadsync_audio_stream::MusicClock,
         live_case: Option<crate::live_case::LiveCase>,
     ) -> Self {
+        crate::play_events::init(dirs.data_dir.join("save").join("play-events"));
         let backend_type = config.video_renderer;
         let software_renderer_threads = config.software_renderer_threads;
         let gfx_debug_enabled = config.gfx_debug;
@@ -8059,12 +8060,18 @@ impl App {
         }
 
         if self.state.shell.overlay_mode.shows_fps() {
+            let stats_start = actors.len();
             screens::components::shared::stats_overlay::push(
                 &mut actors,
                 self.backend_type,
                 self.state.shell.last_fps,
                 self.state.shell.last_vpf,
                 self.stats_overlay_timing(),
+            );
+            crate::recorder_status::push(
+                &mut actors,
+                stats_start,
+                self.state.screens.current_screen == CurrentScreen::Gameplay,
             );
             if self.state.shell.overlay_mode.shows_stutter() {
                 let now_seconds = Instant::now()
@@ -9618,6 +9625,14 @@ impl App {
             }
         }
         if target == CurrentScreen::Gameplay {
+            // A restart replaces the live stage without leaving the screen.
+            // Course stages are closed by the course path below.
+            if prev == CurrentScreen::Gameplay
+                && self.state.session.course_run.is_none()
+                && let Some(gs) = self.state.screens.gameplay_state.as_ref()
+            {
+                crate::play_events::ended(&gs.stage.gameplay, true);
+            }
             let retained_scene = self.pending_song_lua_reload.take();
             let lua_reload = retained_scene.is_some();
             let (retained_scene, held_inputs) = retained_scene.map_or_else(
