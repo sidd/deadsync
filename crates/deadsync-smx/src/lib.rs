@@ -877,6 +877,16 @@ pub fn get_test_data(pad: usize) -> Option<SensorTestData> {
         .and_then(|slot| slot.lock().unwrap().clone())
 }
 
+/// sidd fork: the panels a pad last reported as pressed (bit n = panel n, 0
+/// without the SDK or a pad). One relaxed atomic load: never takes a lock.
+#[must_use]
+pub fn panel_bits(pad: usize) -> u16 {
+    SHARED
+        .get()
+        .and_then(|s| s.prev_input.get(pad))
+        .map_or(0, |bits| bits.load(Ordering::Relaxed))
+}
+
 /// Assign serial numbers to any connected pads that don't have one.
 pub fn set_serial_numbers() {
     if let Some(s) = SHARED.get() {

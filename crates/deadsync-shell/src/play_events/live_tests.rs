@@ -124,7 +124,7 @@ fn judge_first_four(gs: &mut GameplayCoreState) {
 
 fn json(snapshot: &Snapshot) -> Value {
     let mut bytes = Vec::new();
-    encode(snapshot, &mut bytes);
+    encode(snapshot, &[None, None], &mut bytes);
     serde_json::from_slice(&bytes).expect("a snapshot encodes as JSON")
 }
 
@@ -503,4 +503,45 @@ fn the_worker_leaves_an_empty_mailbox_unlocked() {
     std::thread::spawn(move || sender.send(other.take().is_none()));
     assert_eq!(receiver.recv_timeout(Duration::from_secs(2)), Ok(true));
     drop(held);
+}
+
+#[test]
+fn snapshots_list_the_pads_in_use() {
+    let mut gs = state();
+    let mut play = Play::new("a");
+    gs.control
+        .input_state
+        .update_slot(1, deadsync_core::input::InputSource::Keyboard, 0, true);
+
+    let message = json(&play.observe(Instant::now(), &gs).unwrap());
+
+    let pads = message["pads"].as_array().unwrap();
+    assert_eq!(pads.len(), 1);
+    assert_eq!(pads[0]["side"], "P1");
+    assert_eq!(pads[0]["player"], 0);
+    assert_eq!(pads[0]["source"], "input");
+    let down: Vec<bool> = (0..9).map(|panel| panel == 7).collect();
+    assert_eq!(pads[0]["pressed"], serde_json::json!(down));
+    assert_eq!(pads[0]["pressure"], Value::Null);
+}
+
+#[test]
+fn a_panel_press_is_sent_without_waiting_for_the_next_period() {
+    let mut gs = state();
+    let mut play = Play::new("a");
+    let start = Instant::now();
+    let at = |ms| start + Duration::from_millis(ms);
+    assert!(play.observe(at(0), &gs).is_some());
+    assert!(play.observe(at(10), &gs).is_none());
+
+    gs.control
+        .input_state
+        .update_slot(0, deadsync_core::input::InputSource::Keyboard, 0, true);
+    let sent = json(&play.observe(at(11), &gs).expect("sent at once"));
+    assert_eq!(sent["pads"][0]["pressed"][3], true);
+    assert!(play.observe(at(20), &gs).is_none(), "nothing new");
+
+    // An SMX panel the game has no lane for counts too.
+    play.smx = |_| 1 << 4;
+    assert!(play.observe(at(21), &gs).is_some());
 }

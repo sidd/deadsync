@@ -26,6 +26,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 mod live;
+mod pads;
 
 const SCHEMA: u32 = 1;
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
@@ -100,6 +101,9 @@ impl Tracker {
         self.begin(metadata(gs, pack_group), audio_output());
         if let Some(active) = &self.active {
             self.live.start(&self.dir, &active.play_id);
+            if crate::recorder_status::pad_pressure_requested() {
+                pads::request_pressure(gs);
+            }
         }
     }
 

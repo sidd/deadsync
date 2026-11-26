@@ -369,7 +369,7 @@ pub(crate) fn prepare_practice<P, Q>(
     })
 }
 
-fn smx_sensor_value(data: &deadsync_smx::SensorTestData, panel: usize, fsr: bool) -> Option<u16> {
+pub(crate) fn smx_sensor_value(data: &deadsync_smx::SensorTestData, panel: usize, fsr: bool) -> Option<u16> {
     data.have_data_from_panel[panel].then(|| {
         if fsr {
             data.sensor_level[panel]

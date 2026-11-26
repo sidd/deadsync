@@ -11,6 +11,7 @@ use deadlib_present::actors::Actor;
 use deadsync_theme_simply_love::screens::components::shared::recorder_status::{self, Line, Tone};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -26,6 +27,9 @@ const MAX_PROBLEM_CHARS: usize = 40;
 /// The reader lives as long as its slot, so there is only one generation.
 const SLOT: u64 = 1;
 
+/// The recorder asked for pad sensor values (`pad_pressure`).
+static PAD_PRESSURE: AtomicBool = AtomicBool::new(false);
+
 thread_local! {
     static MONITOR: RefCell<Option<Monitor>> = const { RefCell::new(None) };
 }
@@ -33,6 +37,11 @@ thread_local! {
 /// Start following the status file in `dir`. Call once, on the game thread.
 pub(crate) fn init(dir: PathBuf) {
     MONITOR.with_borrow_mut(|monitor| *monitor = Some(Monitor::start(dir)));
+}
+
+/// Whether a fresh status file asks for pad pressure. Never blocks.
+pub(crate) fn pad_pressure_requested() -> bool {
+    PAD_PRESSURE.load(Ordering::Relaxed)
 }
 
 /// Append the recorder lines under the stats overlay. Call right after
@@ -64,6 +73,7 @@ struct StatusFile {
     seconds: Option<f64>,
     dropped_frames: Option<u64>,
     problems: Option<Vec<String>>,
+    pad_pressure: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -88,6 +98,10 @@ fn read_status(dir: &Path, now_ms: i64) -> Status {
         _ if dir.is_dir() => Status::Offline,
         _ => Status::Hidden,
     }
+}
+
+fn wants_pad_pressure(status: &Status) -> bool {
+    matches!(status, Status::Fresh(file) if file.pad_pressure == Some(true))
 }
 
 fn line(text: impl Into<Arc<str>>, tone: Tone) -> Line {
@@ -210,7 +224,9 @@ fn follow(dir: &Path, slot: &Weak<LatestWorkerValue<Panel>>) {
             .map_or(0, |elapsed| {
                 i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
             });
-        let panel = Panel::new(&read_status(dir, now_ms));
+        let status = read_status(dir, now_ms);
+        PAD_PRESSURE.store(wants_pad_pressure(&status), Ordering::Relaxed);
+        let panel = Panel::new(&status);
         let Some(latest) = slot.upgrade() else {
             return;
         };
@@ -290,6 +306,25 @@ mod tests {
             shown(&read(example, NOW + 900), false),
             [line("REC 1:23", Tone::Alert)]
         );
+    }
+
+    #[test]
+    fn pad_pressure_is_wanted_only_when_a_fresh_file_asks() {
+        assert!(wants_pad_pressure(&read(
+            &status_json("idle", r#","pad_pressure":true"#),
+            NOW
+        )));
+        for (extra, now) in [
+            (r#","pad_pressure":true"#, NOW + 5_001),
+            (r#","pad_pressure":false"#, NOW),
+            ("", NOW),
+        ] {
+            assert!(
+                !wants_pad_pressure(&read(&status_json("idle", extra), now)),
+                "{extra}"
+            );
+        }
+        assert!(!wants_pad_pressure(&Status::Hidden));
     }
 
     #[test]

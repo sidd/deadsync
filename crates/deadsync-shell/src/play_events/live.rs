@@ -10,6 +10,7 @@
 //!
 //! Message format: the recorder's API.md.
 
+use super::pads::{self, Pads, SlotSensors};
 use deadsync_assets::gameplay_stage::GameplayCoreState;
 use deadsync_core::input::MAX_PLAYERS;
 use deadsync_gameplay::{
@@ -80,6 +81,7 @@ pub(super) struct Snapshot {
     bpm: f32,
     num_players: usize,
     players: [Player; MAX_PLAYERS],
+    pads: Pads,
 }
 
 #[derive(Clone, Copy)]
@@ -249,6 +251,9 @@ struct Play {
     /// Something happened that has not been sent yet.
     pending: bool,
     tracks: [Track; MAX_PLAYERS],
+    pads: Pads,
+    /// Reads an SMX pad slot's panel bits.
+    smx: fn(usize) -> u16,
 }
 
 impl Play {
@@ -260,6 +265,8 @@ impl Play {
             last_sent: None,
             pending: false,
             tracks: [Track::default(); MAX_PLAYERS],
+            pads: Pads::default(),
+            smx: pads::smx_panel_bits,
         }
     }
 
@@ -267,6 +274,9 @@ impl Play {
         for player in 0..gs.num_players().min(MAX_PLAYERS) {
             self.pending |= self.tracks[player].follow(gs, player);
         }
+        let pads = Pads::capture(gs, self.smx);
+        self.pending |= pads != self.pads;
+        self.pads = pads;
     }
 
     /// Call every frame. Returns a snapshot when one should be sent.
@@ -323,6 +333,7 @@ impl Play {
             bpm: gs.current_bpm_display(),
             num_players,
             players,
+            pads: self.pads,
         }
     }
 }
@@ -342,6 +353,7 @@ struct Message<'a> {
     beat: f32,
     bpm: f64,
     players: Vec<PlayerMessage>,
+    pads: Vec<pads::PadMessage>,
 }
 
 #[derive(Serialize)]
@@ -541,7 +553,7 @@ impl From<&Player> for PlayerMessage {
 }
 
 /// Replace `out` with the snapshot's JSON.
-fn encode(snapshot: &Snapshot, out: &mut Vec<u8>) {
+fn encode(snapshot: &Snapshot, sensors: &SlotSensors, out: &mut Vec<u8>) {
     let rate = f64::from(snapshot.music_rate);
     let bpm = f64::from(snapshot.bpm) * if rate.is_finite() { rate } else { 1.0 };
     let message = Message {
@@ -561,6 +573,7 @@ fn encode(snapshot: &Snapshot, out: &mut Vec<u8>) {
             .iter()
             .map(PlayerMessage::from)
             .collect(),
+        pads: pads::messages(&snapshot.pads, sensors),
     };
     out.clear();
     if let Err(error) = serde_json::to_writer(&mut *out, &message) {
@@ -630,6 +643,7 @@ fn send_snapshots(dir: &Path, mailbox: &Mailbox) {
     };
     let mut bytes = Vec::with_capacity(4096);
     let mut target: Option<(PlayId, u16)> = None;
+    let mut sensors = SlotSensors::default();
     loop {
         // Read before `take`: whatever was posted before a flag changed is
         // then certain to be seen.
@@ -653,10 +667,12 @@ fn send_snapshots(dir: &Path, mailbox: &Mailbox) {
             _ => {
                 let port = port_from_status(dir);
                 target = Some((snapshot.play_id, port));
+                sensors = pads::connected_pads();
                 port
             }
         };
-        encode(&snapshot, &mut bytes);
+        pads::read_sensors(&mut sensors);
+        encode(&snapshot, &sensors, &mut bytes);
         // Best effort: with no recorder listening the datagram is dropped.
         let _ = socket.send_to(&bytes, (Ipv4Addr::LOCALHOST, port));
     }
