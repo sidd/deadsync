@@ -4,15 +4,18 @@
 //! Opt-in: nothing happens unless `<data dir>/save/play-events/` exists.
 //! `events.jsonl` in that directory receives one `stage_start` and one
 //! `stage_end` line per play; `<play_id>.json` holds the full telemetry and is
-//! complete before its `stage_end` line appears. Practice is not reported.
+//! complete before its `stage_end` line appears. While a play is reported, live
+//! snapshots also go to the recorder as UDP datagrams (see `live`). Practice is
+//! not reported.
 //!
-//! Hooks run on the game thread and only collect data. A writer thread does the
-//! serialization and file I/O.
+//! Hooks run on the game thread and only collect data. Worker threads do the
+//! serialization and all file and socket I/O.
 //!
 //! Never serialize a whole `Profile`: it holds online-service credentials.
 
 use deadsync_assets::gameplay_stage::GameplayCoreState;
 use deadsync_core::input::MAX_PLAYERS;
+use deadsync_profile::app_runtime::{cached_local_ex_score_for_id, cached_local_itg_score_for_id};
 use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::fs;
@@ -21,6 +24,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+mod live;
 
 const SCHEMA: u32 = 1;
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
@@ -44,15 +49,11 @@ fn with_tracker(f: impl FnOnce(&mut Tracker)) {
 }
 
 pub(crate) fn started(gs: &GameplayCoreState, pack_group: &str) {
-    with_tracker(|tracker| {
-        if tracker.enabled() {
-            tracker.begin(metadata(gs, pack_group), audio_output());
-        }
-    });
+    with_tracker(|tracker| tracker.stage_started(gs, pack_group));
 }
 
 pub(crate) fn frame(gs: &GameplayCoreState) {
-    with_tracker(|tracker| tracker.frame(Instant::now(), gs.current_music_time_ns()));
+    with_tracker(|tracker| tracker.stage_frame(Instant::now(), gs));
 }
 
 /// How long the reported play has been running, if there is one.
@@ -62,22 +63,7 @@ pub(crate) fn play_age() -> Option<Duration> {
 
 /// Close the active play. Later calls for the same play do nothing.
 pub(crate) fn ended(gs: &GameplayCoreState, restarted: bool) {
-    with_tracker(|tracker| {
-        if tracker.active.is_none() {
-            return;
-        }
-        let outcome = if restarted {
-            "restarted"
-        } else if gs.song_completed_naturally() {
-            "completed"
-        } else if gs.all_joined_players_failed() {
-            "failed"
-        } else {
-            "quit"
-        };
-        let (summary, telemetry) = results(gs);
-        tracker.end(outcome, summary, telemetry, audio_output());
-    });
+    with_tracker(|tracker| tracker.stage_ended(gs, restarted));
 }
 
 struct Active {
@@ -103,15 +89,53 @@ struct Tracker {
     active: Option<Active>,
     writer: Option<(mpsc::Sender<Job>, JoinHandle<()>)>,
     sequence: u32,
+    live: live::Publisher,
 }
 
 impl Tracker {
+    fn stage_started(&mut self, gs: &GameplayCoreState, pack_group: &str) {
+        if !self.enabled() {
+            return;
+        }
+        self.begin(metadata(gs, pack_group), audio_output());
+        if let Some(active) = &self.active {
+            self.live.start(&self.dir, &active.play_id);
+        }
+    }
+
+    fn stage_frame(&mut self, now: Instant, gs: &GameplayCoreState) {
+        if self.active.is_none() {
+            return;
+        }
+        self.frame(now, gs.current_music_time_ns());
+        self.live.frame(now, gs);
+    }
+
+    fn stage_ended(&mut self, gs: &GameplayCoreState, restarted: bool) {
+        if self.active.is_none() {
+            return;
+        }
+        let outcome = if restarted {
+            "restarted"
+        } else if gs.song_completed_naturally() {
+            "completed"
+        } else if gs.all_joined_players_failed() {
+            "failed"
+        } else {
+            "quit"
+        };
+        self.live.finish(gs);
+        let (summary, telemetry) = results(gs);
+        self.end(outcome, summary, telemetry, audio_output());
+    }
+
     fn new(dir: PathBuf) -> Self {
         Self {
             dir,
             active: None,
             writer: None,
             sequence: 0,
+            live: live::Publisher::default(),
         }
     }
 
@@ -279,6 +303,12 @@ fn wall_us() -> i64 {
         })
 }
 
+/// A song folder need not be valid UTF-8, and `json!` panics on a path that is
+/// not, so such bytes are replaced.
+fn path_text(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
 fn debug(value: impl std::fmt::Debug) -> String {
     format!("{value:?}")
 }
@@ -303,9 +333,12 @@ fn metadata(gs: &GameplayCoreState, pack_group: &str) -> Value {
             let chart = &gs.charts()[player];
             let profile = &gs.profiles()[player];
             let side = gs.setup.session.runtime_player_side(player);
+            let profile_id = gs.setup.session.active_profile_id_for_side(side);
+            let totals = gs.stage_totals_for_player(player);
             json!({
                 "side": debug(side),
-                "profile_id": gs.setup.session.active_profile_id_for_side(side),
+                "profile_id": profile_id,
+                "previous_best": previous_best(profile_id.as_deref(), &chart.short_hash),
                 "profile_name": profile.display_name,
                 "chart": {
                     "hash": chart.short_hash,
@@ -317,6 +350,27 @@ fn metadata(gs: &GameplayCoreState, pack_group: &str) -> Value {
                     "step_artist": chart.step_artist,
                     "max_nps": chart.max_nps,
                     "breakdown": chart.detailed_breakdown,
+                    "breakdown_partial": chart.partial_breakdown,
+                    "breakdown_simple": chart.simple_breakdown,
+                    "total_streams": chart.total_streams,
+                    "total_measures": chart.total_measures,
+                    // Unscaled by the music rate, as are the density arrays.
+                    "min_bpm": chart.min_bpm,
+                    "max_bpm": chart.max_bpm,
+                    "measure_nps": chart.measure_nps_vec.iter()
+                        .map(|&nps| milli(nps)).collect::<Vec<_>>(),
+                    "measure_seconds": chart.measure_seconds_vec.iter()
+                        .map(|&second| milli(second.into())).collect::<Vec<_>>(),
+                    // Counted after chart-changing options.
+                    "totals": {
+                        "steps": totals.total_steps,
+                        "holds": totals.holds_total,
+                        "rolls": totals.rolls_total,
+                        "mines": totals.mines_total,
+                        "possible_grade_points": totals.possible_grade_points,
+                        "jumps": chart.stats.jumps,
+                        "hands": chart.stats.hands,
+                    },
                 },
                 "options": {
                     "scroll_speed": debug(profile.scroll_speed),
@@ -341,9 +395,13 @@ fn metadata(gs: &GameplayCoreState, pack_group: &str) -> Value {
             "genre": song.genre,
             "display_bpm": song.display_bpm,
             "length_seconds": song.music_length_seconds,
-            "simfile_path": song.simfile_path,
-            "music_path": song.music_path,
-            "banner_path": song.banner_path,
+            "first_second": song.precise_first_second(),
+            "last_second": song.precise_last_second(),
+            "min_bpm": song.min_bpm,
+            "max_bpm": song.max_bpm,
+            "simfile_path": path_text(&song.simfile_path),
+            "music_path": song.music_path.as_deref().map(path_text),
+            "banner_path": song.banner_path.as_deref().map(path_text),
         },
         "pack": pack_group,
         "play_style": debug(gs.setup.session.play_style),
@@ -354,6 +412,24 @@ fn metadata(gs: &GameplayCoreState, pack_group: &str) -> Value {
         "cols_per_player": gs.cols_per_player(),
         "players": players,
     })
+}
+
+/// The profile's best local scores on a chart from before this play. Reads the
+/// score cache that gameplay setup has already loaded.
+fn previous_best(profile_id: Option<&str>, chart_hash: &str) -> Value {
+    let itg = profile_id.and_then(|id| cached_local_itg_score_for_id(id, chart_hash));
+    let ex = profile_id.and_then(|id| cached_local_ex_score_for_id(id, chart_hash));
+    json!({
+        "itg": itg.map(|best| json!({
+            "percent": best.score_percent * 100.0,
+            "grade": debug(best.grade),
+        })),
+        "ex": ex.map(|best| json!({ "percent": best.percent, "failed": best.is_fail })),
+    })
+}
+
+fn milli(value: f64) -> f64 {
+    (value * 1000.0).round() / 1000.0
 }
 
 /// Final scores, plus note-by-note and input telemetry for each player.
@@ -466,6 +542,96 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect()
+    }
+
+    #[test]
+    fn stage_start_describes_the_chart_without_credentials() {
+        const SECRET: &str = "credential-that-must-stay-private";
+        let gs = live::tests::state_with(Default::default(), |profile| {
+            profile.groovestats_api_key = SECRET.into();
+            profile.arrowcloud_api_key = SECRET.into();
+            profile.groovestats_username = SECRET.into();
+        });
+
+        let play = metadata(&gs, "Pack");
+
+        assert!(!play.to_string().contains(SECRET));
+        let song = &play["song"];
+        assert_eq!(song["min_bpm"], 150.0);
+        assert_eq!(song["max_bpm"], 150.0);
+        assert!(song["last_second"].as_f64().unwrap() > 0.0);
+        assert!(song["first_second"].is_number());
+        let chart = &play["players"][0]["chart"];
+        assert_eq!(chart["min_bpm"], 150.0);
+        assert_eq!(chart["max_bpm"], 150.0);
+        let nps = chart["measure_nps"].as_array().unwrap();
+        let seconds = chart["measure_seconds"].as_array().unwrap();
+        assert_eq!(nps.len(), 2);
+        assert_eq!(seconds.len(), 2);
+        // 150 BPM: a measure is 1.6 s, and the first holds four notes.
+        assert_eq!(nps[0], 2.5);
+        assert_eq!(seconds[1], 1.6);
+        assert_eq!(chart["total_measures"], gs.charts()[0].total_measures);
+        assert_eq!(chart["total_streams"], 0);
+        for key in ["breakdown", "breakdown_partial", "breakdown_simple"] {
+            assert!(chart[key].is_string(), "{key}");
+        }
+        assert_eq!(
+            chart["totals"],
+            json!({"steps": 7, "holds": 1, "rolls": 0, "mines": 1,
+                   "possible_grade_points": 40, "jumps": 0, "hands": 0})
+        );
+        assert_eq!(
+            play["players"][0]["previous_best"],
+            json!({"itg": null, "ex": null})
+        );
+    }
+
+    #[test]
+    fn a_reported_play_publishes_live_snapshots_under_its_play_id() {
+        let (dir, socket) = live::tests::listener();
+        let gs = live::tests::state();
+        let mut tracker = Tracker::new(dir.path().to_path_buf());
+
+        tracker.stage_started(&gs, "Pack");
+        tracker.stage_frame(Instant::now(), &gs);
+        let first = live::tests::receive(&socket);
+        tracker.stage_ended(&gs, false);
+        let last = live::tests::receive(&socket);
+        drop(tracker);
+
+        let events = read_events(dir.path());
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0]["play"]["pack"], "Pack");
+        assert_eq!(events[1]["outcome"], "quit");
+        assert_eq!(first["play_id"], events[0]["play_id"]);
+        assert_eq!(last["play_id"], events[0]["play_id"]);
+        assert_eq!(last["ended"], true);
+    }
+
+    #[test]
+    fn nothing_happens_without_the_play_events_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let missing = root.path().join("play-events");
+        let gs = live::tests::state();
+        let mut tracker = Tracker::new(missing.clone());
+
+        tracker.stage_started(&gs, "Pack");
+        tracker.stage_frame(Instant::now(), &gs);
+        tracker.stage_ended(&gs, false);
+
+        assert!(tracker.active.is_none());
+        assert!(tracker.writer.is_none());
+        assert!(!tracker.live.is_running());
+        assert!(!missing.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_path_that_is_not_utf8_is_still_reported() {
+        use std::os::unix::ffi::OsStrExt;
+        let path = Path::new(std::ffi::OsStr::from_bytes(b"/songs/caf\xe9/a.ogg"));
+        assert_eq!(json!(path_text(path)), "/songs/caf\u{fffd}/a.ogg");
     }
 
     #[test]
