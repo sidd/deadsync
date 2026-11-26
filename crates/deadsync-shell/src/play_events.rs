@@ -100,10 +100,15 @@ impl Tracker {
         }
         self.begin(metadata(gs, pack_group), audio_output());
         if let Some(active) = &self.active {
-            self.live.start(&self.dir, &active.play_id);
-            if crate::recorder_status::pad_pressure_requested() {
-                pads::request_pressure(gs);
-            }
+            // The worker turns on sensor test mode: the call takes the SDK's
+            // lock. Only the recorder's values change; the player's own FSR
+            // display stays as their option set it.
+            let pressure = if crate::recorder_status::pad_pressure_requested() {
+                pads::pressure_slots(gs)
+            } else {
+                0
+            };
+            self.live.start(&self.dir, &active.play_id, pressure);
         }
     }
 

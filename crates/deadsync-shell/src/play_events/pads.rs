@@ -10,7 +10,10 @@
 //! Pressure needs the SDK's sensor test mode, which streams sensor values over
 //! USB at about 30 Hz per pad. The gameplay FSR display option turns it on for
 //! its own pads, and the recorder can ask for it with `pad_pressure` in its
-//! status file (see `request_pressure`). Leaving gameplay turns it off again.
+//! status file; the live worker then turns it on (see `start_sensor_test`).
+//! Test mode only makes values available: the on-screen display is drawn from
+//! views that gameplay fills for the player's own option, never for the
+//! recorder. Leaving gameplay turns test mode off again.
 
 use deadsync_assets::gameplay_stage::GameplayCoreState;
 use deadsync_core::input::{LaneMask, MAX_PLAYERS};
@@ -124,16 +127,21 @@ pub(super) fn smx_panel_bits(slot: usize) -> u16 {
     deadsync_smx::panel_bits(slot)
 }
 
-/// Ask the SMX pads of this play for sensor values. Called once as the play
-/// starts, only when the recorder asked for pressure; costs what the gameplay
-/// FSR display costs when it starts. Leaving gameplay turns it off again.
-pub(super) fn request_pressure(gs: &GameplayCoreState) {
-    for pad in Pads::capture(gs, |_| 0).as_slice() {
-        deadsync_smx::set_test_mode(
-            usize::from(pad.slot),
-            deadsync_smx::SensorTestMode::CalibratedValues,
-        );
-    }
+/// The pad slots of this play, bit n for slot n. Game thread, once as the
+/// play starts: plain data, no SDK call.
+pub(super) fn pressure_slots(gs: &GameplayCoreState) -> u8 {
+    Pads::capture(gs, |_| 0)
+        .as_slice()
+        .iter()
+        .fold(0, |slots, pad| slots | (1 << pad.slot))
+}
+
+/// Worker: ask the SMX pad in a slot for sensor values. Takes the SDK's lock,
+/// which its USB thread holds during writes and device opens, so it never runs
+/// on the game thread. Costs what the gameplay FSR display costs when it
+/// starts; leaving gameplay turns it off again.
+pub(super) fn start_sensor_test(slot: usize) {
+    deadsync_smx::set_test_mode(slot, deadsync_smx::SensorTestMode::CalibratedValues);
 }
 
 /// What the worker knows about the SMX pad in a slot.
@@ -299,6 +307,15 @@ mod tests {
         assert_eq!(sent[0].source, "smx");
         assert_eq!(pressed(&sent[0]), [4]);
         assert!(sent[0].pressure.is_none());
+    }
+
+    #[test]
+    fn pressure_is_asked_for_the_pads_in_use() {
+        assert_eq!(pressure_slots(&super::super::live::tests::state()), 0b01);
+        for style in [Style::Versus, Style::Double] {
+            let gs = super::super::live::tests::state_with(style, |_| {});
+            assert_eq!(pressure_slots(&gs), 0b11, "{style:?}");
+        }
     }
 
     #[test]

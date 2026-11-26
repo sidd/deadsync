@@ -8,6 +8,10 @@
 //! encodes JSON and sends one UDP datagram to the recorder on this machine.
 //! Anything not accepted is dropped.
 //!
+//! When the recorder wants pad pressure, the worker also turns on the SMX
+//! sensor test mode, since that call takes the SDK's lock (see
+//! [`PressureGate`]).
+//!
 //! Message format: the recorder's API.md.
 
 use super::pads::{self, Pads, SlotSensors};
@@ -26,7 +30,7 @@ use deadsync_rules::timing::{LiveTimingSnapshot, WindowCounts};
 use serde::Serialize;
 use std::net::{Ipv4Addr, UdpSocket};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -593,6 +597,58 @@ fn port_from_status(dir: &Path) -> u16 {
         .unwrap_or(DEFAULT_PORT)
 }
 
+/// Hands a play's request for pad pressure to the worker.
+///
+/// Turning test mode on takes the SDK's lock, which can be held for a USB
+/// write or a device open, so the game thread only records the request and
+/// the worker makes the call. Leaving gameplay turns test mode off on the game
+/// thread; `end` makes sure the worker's call cannot land after that.
+#[derive(Default)]
+pub(super) struct PressureGate {
+    /// `generation << 8 | slots` of the newest play; 0 before the first.
+    request: AtomicU64,
+    /// Newest generation whose play has ended. The worker holds the lock while
+    /// it turns test mode on, so a play cannot end halfway through the call.
+    ended: Mutex<u64>,
+}
+
+impl PressureGate {
+    /// Game thread, as a play starts: one atomic store.
+    fn request(&self, generation: u64, slots: u8) {
+        self.request
+            .store((generation << 8) | u64::from(slots), Ordering::Release);
+    }
+
+    /// Game thread, as a play that asked for pressure ends, before gameplay
+    /// turns test mode off. Waits only while the worker is in its call.
+    fn end(&self, generation: u64) {
+        let mut ended = self.ended.lock().unwrap_or_else(PoisonError::into_inner);
+        *ended = (*ended).max(generation);
+    }
+
+    /// Worker: act on a new request once, unless its play has ended.
+    fn apply(&self, applied: &mut u64, mut sensor_on: impl FnMut(usize)) {
+        let request = self.request.load(Ordering::Acquire);
+        let generation = request >> 8;
+        if generation == *applied {
+            return;
+        }
+        *applied = generation;
+        let slots = request & 0xff;
+        if slots == 0 {
+            return;
+        }
+        let ended = self.ended.lock().unwrap_or_else(PoisonError::into_inner);
+        if *ended >= generation {
+            return;
+        }
+        for slot in (0..8).filter(|slot| slots & (1 << slot) != 0) {
+            sensor_on(slot);
+        }
+        drop(ended);
+    }
+}
+
 /// One replaceable value. The game thread never waits for it.
 #[derive(Default)]
 struct Mailbox {
@@ -602,6 +658,7 @@ struct Mailbox {
     /// A play is running, so the worker polls instead of parking.
     playing: AtomicBool,
     closed: AtomicBool,
+    pressure: PressureGate,
 }
 
 impl Mailbox {
@@ -629,7 +686,7 @@ impl Mailbox {
 }
 
 /// Worker thread: encode and send until the mailbox is closed.
-fn send_snapshots(dir: &Path, mailbox: &Mailbox) {
+fn send_snapshots(dir: &Path, mailbox: &Mailbox, sensor_on: fn(usize)) {
     let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).and_then(|socket| {
         socket.set_nonblocking(true)?;
         Ok(socket)
@@ -644,11 +701,13 @@ fn send_snapshots(dir: &Path, mailbox: &Mailbox) {
     let mut bytes = Vec::with_capacity(4096);
     let mut target: Option<(PlayId, u16)> = None;
     let mut sensors = SlotSensors::default();
+    let mut pressure = 0;
     loop {
         // Read before `take`: whatever was posted before a flag changed is
         // then certain to be seen.
         let closed = mailbox.closed.load(Ordering::Acquire);
         let playing = mailbox.playing.load(Ordering::Acquire);
+        mailbox.pressure.apply(&mut pressure, sensor_on);
         let Some(snapshot) = mailbox.take() else {
             if closed {
                 return;
@@ -684,13 +743,13 @@ struct Worker {
 }
 
 impl Worker {
-    fn spawn(dir: &Path) -> Option<Self> {
+    fn spawn(dir: &Path, sensor_on: fn(usize)) -> Option<Self> {
         let mailbox = Arc::new(Mailbox::default());
         let shared = Arc::clone(&mailbox);
         let dir = dir.to_path_buf();
         std::thread::Builder::new()
             .name("play-live".into())
-            .spawn(move || send_snapshots(&dir, &shared))
+            .spawn(move || send_snapshots(&dir, &shared, sensor_on))
             .map_err(|error| log::warn!("Failed to start the live snapshot sender: {error}"))
             .ok()
             .map(|thread| Self { mailbox, thread })
@@ -704,10 +763,27 @@ impl Worker {
 }
 
 /// Sends the active play's snapshots. The worker starts with the first play.
-#[derive(Default)]
 pub(super) struct Publisher {
     worker: Option<Worker>,
     play: Option<Play>,
+    /// Numbers the plays for the pressure gate.
+    generation: u64,
+    /// A play asked for pressure and has not ended in the gate yet.
+    pressure_pending: bool,
+    /// Turns on sensor test mode for a pad slot, on the worker.
+    sensor_on: fn(usize),
+}
+
+impl Default for Publisher {
+    fn default() -> Self {
+        Self {
+            worker: None,
+            play: None,
+            generation: 0,
+            pressure_pending: false,
+            sensor_on: pads::start_sensor_test,
+        }
+    }
 }
 
 impl Publisher {
@@ -716,12 +792,17 @@ impl Publisher {
         self.worker.is_some()
     }
 
-    /// Begin a play. `dir` is the play-events directory.
-    pub(super) fn start(&mut self, dir: &Path, play_id: &str) {
+    /// Begin a play. `dir` is the play-events directory; `pressure_slots`
+    /// are the pad slots to read sensor values from (bit n for slot n).
+    pub(super) fn start(&mut self, dir: &Path, play_id: &str, pressure_slots: u8) {
         if self.worker.is_none() {
-            self.worker = Worker::spawn(dir);
+            self.worker = Worker::spawn(dir, self.sensor_on);
         }
         if let Some(worker) = &self.worker {
+            // Every play replaces the request, so an older one is never acted on.
+            self.generation += 1;
+            worker.mailbox.pressure.request(self.generation, pressure_slots);
+            self.pressure_pending |= pressure_slots != 0;
             worker.set_playing(true);
         }
         self.play = Some(Play::new(play_id));
@@ -742,6 +823,9 @@ impl Publisher {
         if let (Some(mut play), Some(worker)) = (self.play.take(), &self.worker) {
             // Dropped if the worker is busy: `stage_end` is the record.
             worker.mailbox.post(&play.finish(gs));
+            if std::mem::take(&mut self.pressure_pending) {
+                worker.mailbox.pressure.end(self.generation);
+            }
             worker.set_playing(false);
         }
     }

@@ -441,7 +441,7 @@ fn the_publisher_sends_datagrams_from_its_worker() {
     let (dir, socket) = listener();
     let mut gs = state();
     let mut publisher = Publisher::default();
-    publisher.start(dir.path(), "play-1");
+    publisher.start(dir.path(), "play-1", 0);
 
     publisher.frame(Instant::now(), &gs);
     let first = receive(&socket);
@@ -458,7 +458,7 @@ fn the_publisher_sends_datagrams_from_its_worker() {
     // A finished play sends nothing more; the next play starts its own count.
     publisher.frame(Instant::now() + Duration::from_secs(1), &gs);
     publisher.finish(&gs);
-    publisher.start(dir.path(), "play-2");
+    publisher.start(dir.path(), "play-2", 0);
     publisher.frame(Instant::now(), &gs);
     let next = receive(&socket);
     assert_eq!(
@@ -483,7 +483,7 @@ fn a_snapshot_posted_during_a_play_is_sent_without_waking_the_worker() {
     let (dir, socket) = listener();
     let gs = state();
     let mut publisher = Publisher::default();
-    publisher.start(dir.path(), "play-1");
+    publisher.start(dir.path(), "play-1", 0);
     // Let the worker settle into its wait.
     std::thread::sleep(Duration::from_millis(50));
 
@@ -544,4 +544,115 @@ fn a_panel_press_is_sent_without_waiting_for_the_next_period() {
     // An SMX panel the game has no lane for counts too.
     play.smx = |_| 1 << 4;
     assert!(play.observe(at(21), &gs).is_some());
+}
+
+/// A test-mode switch that records which thread called it.
+static SENSOR_CALLS: Mutex<Vec<(usize, Option<String>)>> = Mutex::new(Vec::new());
+
+fn record_sensor_call(slot: usize) {
+    let thread = std::thread::current().name().map(str::to_owned);
+    SENSOR_CALLS.lock().unwrap().push((slot, thread));
+}
+
+#[test]
+fn a_pressure_request_is_applied_once_by_the_worker() {
+    let gate = PressureGate::default();
+    let mut applied = 0;
+    let mut calls = Vec::new();
+    gate.apply(&mut applied, |slot| calls.push(slot));
+    assert!(calls.is_empty(), "nothing asked for yet");
+
+    gate.request(1, 0b11);
+    gate.apply(&mut applied, |slot| calls.push(slot));
+    gate.apply(&mut applied, |slot| calls.push(slot));
+    assert_eq!(calls, [0, 1]);
+
+    // A play without pressure turns nothing on; the next one with it does.
+    gate.request(2, 0);
+    gate.apply(&mut applied, |slot| calls.push(slot));
+    gate.request(3, 0b10);
+    gate.apply(&mut applied, |slot| calls.push(slot));
+    assert_eq!(calls, [0, 1, 1]);
+}
+
+/// Leaving gameplay turns test mode off on the game thread. A request the
+/// worker had not reached by then must never turn it back on.
+#[test]
+fn a_request_from_a_play_that_has_ended_is_dropped() {
+    let gate = PressureGate::default();
+    let mut applied = 0;
+    let mut calls = Vec::new();
+    gate.request(1, 0b01);
+    gate.end(1);
+    gate.apply(&mut applied, |slot| calls.push(slot));
+    assert!(calls.is_empty());
+
+    // Ending a later play covers any older request still waiting.
+    gate.request(2, 0b01);
+    gate.request(3, 0);
+    gate.end(3);
+    gate.apply(&mut applied, |slot| calls.push(slot));
+    assert!(calls.is_empty());
+}
+
+#[test]
+fn ending_a_play_waits_for_a_test_mode_call_in_flight() {
+    let gate = Arc::new(PressureGate::default());
+    gate.request(1, 0b01);
+    let (entered, in_call) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let worker = {
+        let gate = Arc::clone(&gate);
+        std::thread::spawn(move || {
+            let mut applied = 0;
+            gate.apply(&mut applied, |_| {
+                entered.send(()).unwrap();
+                released.recv().unwrap();
+            });
+        })
+    };
+    in_call.recv_timeout(Duration::from_secs(2)).unwrap();
+    let (ended, has_ended) = std::sync::mpsc::channel();
+    let ender = {
+        let gate = Arc::clone(&gate);
+        std::thread::spawn(move || {
+            gate.end(1);
+            ended.send(()).unwrap();
+        })
+    };
+    assert!(
+        has_ended.recv_timeout(Duration::from_millis(100)).is_err(),
+        "the end of the play must wait for the call"
+    );
+    release.send(()).unwrap();
+    has_ended.recv_timeout(Duration::from_secs(2)).unwrap();
+    worker.join().unwrap();
+    ender.join().unwrap();
+}
+
+#[test]
+fn the_worker_turns_on_test_mode_only_when_a_play_asks() {
+    let (dir, _socket) = listener();
+    let gs = state();
+    let mut publisher = Publisher::default();
+    publisher.sensor_on = record_sensor_call;
+    publisher.start(dir.path(), "play-1", 0);
+    publisher.frame(Instant::now(), &gs);
+    publisher.finish(&gs);
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(SENSOR_CALLS.lock().unwrap().is_empty());
+
+    publisher.start(dir.path(), "play-2", 0b10);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while SENSOR_CALLS.lock().unwrap().is_empty() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    // From the worker, never from the game thread that started the play.
+    assert_eq!(
+        *SENSOR_CALLS.lock().unwrap(),
+        [(1, Some("play-live".to_owned()))]
+    );
+    publisher.finish(&gs);
+    drop(publisher);
+    assert_eq!(SENSOR_CALLS.lock().unwrap().len(), 1);
 }
