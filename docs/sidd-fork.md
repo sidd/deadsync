@@ -8,6 +8,8 @@ whenever upstream cuts a release.
 | Patch | What it does |
 |---|---|
 | `feat(eval): add local EX-score leaderboard pane` | New Evaluation page after Machine Records: the same local machine/personal leaderboard, ranked by EX score, tagged "EX". |
+| `fix(audio): wait longer for a busy output device` | Raises the startup busy-device retry from 5 s to 15 s. |
+| `feat(recorder): publish play events and show recording status` | With `<data dir>/save/play-events/` present, writes song start/end events and per-play telemetry there for the external recorder, and shows the recorder's `recorder-status.json` under the stats overlay (F3). Without that folder nothing changes. |
 
 Keep the stack small. Every patch is a future rebase conflict.
 
