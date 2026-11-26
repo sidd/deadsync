@@ -58,7 +58,7 @@ pub fn collect_stutter_diag_events(
 }
 
 /// How many times to retry opening an audio device that reports "busy" at startup.
-const DEVICE_BUSY_RETRIES: u32 = 20;
+const DEVICE_BUSY_RETRIES: u32 = 60;
 const DEVICE_BUSY_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// True for an open failure caused by another holder of the device (EBUSY).
